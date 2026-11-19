@@ -120,7 +120,7 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
     <p class="mute">金鑰只會存在這支手機的瀏覽器裡，不會上傳到任何地方。</p>
     <label>TDX Client Id</label><input id="kTdxId" autocomplete="off" autocapitalize="off" spellcheck="false">
     <label>TDX Client Secret</label><input id="kTdxSecret" autocomplete="off" autocapitalize="off" spellcheck="false">
-    <label>Google 金鑰（Routes API）</label><input id="kGoogle" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <label>Google 金鑰（Maps JavaScript API + Routes API）</label><input id="kGoogle" autocomplete="off" autocapitalize="off" spellcheck="false">
     <div id="kMsg" class="mute" style="min-height:20px;margin:8px 0"></div>
     <div style="display:flex;gap:8px">
       <button id="kSave" class="sbtn">儲存並測試</button>
@@ -565,35 +565,154 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "p1";
+const VERSION = "p2";
 function showMapErr(msg){
   const box = $("mapErr");
   box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>地圖載入有問題</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
   box.style.display = "block";
 }
 
+// ====== 地圖：優先用 Google 地圖，失敗自動改用 OpenStreetMap ======
+const GM_REASON = {
+  ApiNotActivatedMapError: "Maps JavaScript API 沒有啟用",
+  BillingNotEnabledMapError: "Google 專案沒有綁定帳單",
+  RefererNotAllowedMapError: "金鑰的網站限制沒有包含 " + location.origin + "/*",
+  InvalidKeyMapError: "金鑰不正確",
+  ApiTargetBlockedMapError: "金鑰的 API 限制沒有勾 Maps JavaScript API",
+  ExpiredKeyMapError: "金鑰已過期",
+};
+const MAP = {
+  kind: null, g: null, l: null, objs: new Set(), moveCb: null, done: false,
+
+  start(){
+    if (KEYS.google) this.loadGoogle(); else this.useLeaflet();
+  },
+
+  loadGoogle(){
+    let ok = false, failed = false;
+    const fail = why => {
+      if (ok || failed) return; failed = true;
+      notice(`Google 地圖無法使用（${why}），先改用 OpenStreetMap。`);
+      this.useLeaflet();
+    };
+    window.gm_authFailure = () => fail(this.gmCode ? GM_REASON[this.gmCode] || this.gmCode : "金鑰被拒絕");
+    const ce = console.error.bind(console);
+    console.error = (...a) => { const m = a.map(String).join(" ").match(/(\w+MapError)/); if (m) this.gmCode = m[1]; ce(...a); };
+    window.__gmReady = () => {
+      try {
+        this.kind = "google";
+        const el = this.freshDiv();
+        this.g = new google.maps.Map(el, {center: {lat: 25.0478, lng: 121.5170}, zoom: 16,
+          disableDefaultUI: true, clickableIcons: false, gestureHandling: "greedy"});
+        this.g.addListener("tilesloaded", () => { ok = true; });
+        this.g.addListener("idle", () => this.moveCb && this.moveCb());
+        this.defineOverlay();
+        this.redraw();
+        if (!this.done){ this.done = true; locate(); }
+      } catch (e) { fail("啟動失敗"); }
+    };
+    const sc = document.createElement("script");
+    sc.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(KEYS.google)}&v=weekly&language=zh-TW&region=TW&callback=__gmReady`;
+    sc.async = true; sc.onerror = () => fail("下載不到 Google 地圖");
+    document.head.appendChild(sc);
+    setTimeout(() => { if (!ok) fail(this.gmCode ? GM_REASON[this.gmCode] || this.gmCode : "等太久沒有回應"); }, 10000);
+  },
+
+  useLeaflet(){
+    if (!window.L){ notice("下載不到地圖程式，請確認網路後重新整理。"); return; }
+    this.kind = "leaflet"; this.g = null;
+    const el = this.freshDiv();
+    this.l = L.map(el, {zoomControl: false}).setView([25.0478, 121.5170], 16);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19,
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(this.l);
+    this.l.on("moveend", () => this.moveCb && this.moveCb());
+    this.redraw();
+    if (S.me) this.panTo(S.me.lat, S.me.lon);
+    if (!this.done){ this.done = true; locate(); }
+  },
+
+  freshDiv(){
+    const host = $("map"); host.innerHTML = "";
+    const d = document.createElement("div"); d.style.cssText = "position:absolute;inset:0";
+    host.appendChild(d); return d;
+  },
+
+  defineOverlay(){
+    class HtmlOv extends google.maps.OverlayView {
+      constructor(o){ super(); this.o = o;
+        const d = this.div = document.createElement("div");
+        d.style.cssText = `position:absolute;z-index:${1000 + (o.z || 0)}`;
+        d.innerHTML = `<div style="transform:translate(-50%,${o.bottom ? "-100%" : "-50%"})" title="${esc(o.title || "")}">${o.html}</div>`;
+        d.addEventListener("click", e => { e.stopPropagation(); o.click && o.click(); });
+      }
+      onAdd(){ this.getPanes().overlayMouseTarget.appendChild(this.div); google.maps.OverlayView.preventMapHitsAndGesturesFrom(this.div); }
+      draw(){ const p = this.getProjection().fromLatLngToDivPixel(new google.maps.LatLng(this.o.lat, this.o.lng));
+        if (p){ this.div.style.left = p.x + "px"; this.div.style.top = p.y + "px"; } }
+      onRemove(){ this.div.remove(); }
+    }
+    this.HtmlOv = HtmlOv;
+  },
+
+  // 建立實際的地圖物件（換地圖引擎時會重建）
+  build(o){
+    if (o.type === "marker"){
+      if (this.kind === "google") { const v = new this.HtmlOv(o); v.setMap(this.g); return () => v.setMap(null); }
+      const icon = L.divIcon({className: "", iconSize: null,
+        html: `<div style="transform:translate(-50%,${o.bottom ? "-100%" : "-50%"})" title="${esc(o.title || "")}">${o.html}</div>`});
+      const m = L.marker([o.lat, o.lng], {icon, zIndexOffset: o.z || 0, keyboard: false}).addTo(this.l);
+      m.on("click", () => o.click && o.click());
+      return () => m.remove();
+    } else {
+      if (this.kind === "google") {
+        const pl = new google.maps.Polyline({map: this.g, path: o.path.map(([a, b]) => ({lat: a, lng: b})), strokeColor: o.color, strokeWeight: 6, strokeOpacity: .9});
+        return () => pl.setMap(null);
+      }
+      const pl = L.polyline(o.path, {color: o.color, weight: 6, opacity: .9}).addTo(this.l);
+      return () => pl.remove();
+    }
+  },
+  add(o){
+    const w = {o, kill: null, remove: () => { w.kill && w.kill(); this.objs.delete(w); }, onClick: fn => { o.click = fn; return w; }};
+    this.objs.add(w); if (this.kind) w.kill = this.build(o); return w;
+  },
+  redraw(){ for (const w of this.objs){ w.kill && w.kill(); w.kill = this.build(w.o); } },
+
+  marker(lat, lng, html, title, z, bottom){ return this.add({type: "marker", lat, lng, html, title, z, bottom}); },
+  line(path, color){ return this.add({type: "line", path, color}); },
+
+  panTo(lat, lng, zoom){
+    if (this.kind === "google"){ this.g.panTo({lat, lng}); if (zoom) this.g.setZoom(zoom); }
+    else if (this.kind === "leaflet"){ zoom ? this.l.setView([lat, lng], zoom) : this.l.panTo([lat, lng]); }
+  },
+  fit(points, frac){
+    const top = 90, bottom = window.innerHeight * frac;
+    if (this.kind === "google"){
+      const b = new google.maps.LatLngBounds(); points.forEach(([a, c]) => b.extend({lat: a, lng: c}));
+      this.g.fitBounds(b, {top, bottom, left: 30, right: 30});
+    } else if (this.kind === "leaflet"){
+      this.l.fitBounds(points, {paddingTopLeft: [30, top], paddingBottomRight: [30, bottom]});
+    }
+  },
+  center(){
+    if (this.kind === "google"){ const c = this.g.getCenter(); return {lat: c.lat(), lng: c.lng()}; }
+    const c = this.l.getCenter(); return {lat: c.lat, lng: c.lng};
+  },
+  zoom(){ return this.kind === "google" ? this.g.getZoom() : this.l.getZoom(); },
+};
+function notice(msg){ showMapErr(msg); clearTimeout(notice.t); notice.t = setTimeout(() => $("mapErr").style.display = "none", 9000); }
+
 function initMap(){
-  if (!window.L){ showMapErr("下載不到地圖程式，請確認網路後重新整理。"); return; }
-  map = L.map("map", {zoomControl: false, attributionControl: true}).setView([25.0478, 121.5170], 16);
-  let tileErr = 0;
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  }).on("tileerror", () => { if (++tileErr === 6) showMapErr("地圖圖片下載失敗，可能被廣告阻擋器或網路擋住。"); })
-    .addTo(map);
-  map.on("moveend", () => {
+  MAP.moveCb = () => {
     if (!S.area) return;
-    const far = map.distance(map.getCenter(), L.latLng(S.area.lat, S.area.lon)) > 400;
-    $("areaBtn").style.display = far && map.getZoom() >= 14 ? "block" : "none";
-  });
-  locate();
+    const c = MAP.center();
+    const far = distM(c.lat, c.lng, S.area.lat, S.area.lon) > 400;
+    $("areaBtn").style.display = far && MAP.zoom() >= 14 ? "block" : "none";
+  };
+  MAP.start();
 }
 
-// 標記：用 HTML 做成圖示
-function mk(pos, html, title, z, anchorBottom){
-  const icon = L.divIcon({className: "", iconSize: null,
-    html: `<div style="transform:translate(-50%,${anchorBottom ? "-100%" : "-50%"})" title="${esc(title || "")}">${html}</div>`});
-  return L.marker([pos.lat, pos.lng], {icon, zIndexOffset: z || 0, keyboard: false}).addTo(map);
-}
+// 標記
+function mk(pos, html, title, z, anchorBottom){ return MAP.marker(pos.lat, pos.lng, html, title, z, anchorBottom); }
 function rm(m){ if (m) m.remove(); }
 const ICON = {
   me: () => `<div class="me"></div>`,
@@ -624,13 +743,13 @@ function locate(){
     S.me = {lat: p.coords.latitude, lon: p.coords.longitude};
     S.located = true;
     placeMe();
-    map.panTo({lat: S.me.lat, lng: S.me.lon}); map.setZoom(16);
+    MAP.panTo(S.me.lat, S.me.lon, 16);
     loadNear(S.me);
   }, e => useFallback(e.code === 1 ? "你沒有允許定位" : "無法取得定位"), {enableHighAccuracy: true, timeout: 10000, maximumAge: 30000});
 }
 function useFallback(msg){
   S.me = {lat: 25.0478, lon: 121.5170}; S.located = false; S.locMsg = msg + "，先以台北車站為起點。";
-  placeMe(); map.panTo({lat: S.me.lat, lng: S.me.lon});
+  placeMe(); MAP.panTo(S.me.lat, S.me.lon);
   loadNear(S.me);
 }
 function placeMe(){
@@ -662,11 +781,10 @@ function bikeColor(b){
 }
 
 function drawNearMarkers(){
-  if (!map) return;
   bikeMarkers.forEach(rm); busMarkers.forEach(rm);
   bikeMarkers = S.bikes.map(b => {
     const m = mk({lat: b.lat, lng: b.lon}, ICON.bike(b, bikeColor(b)), b.name, 10);
-    m.on("click", () => { openSheet(); S.tab = "near"; S.focusBike = b.id; render(); document.querySelector(`[data-bike="${CSS.escape(b.id)}"]`)?.scrollIntoView({behavior:"smooth", block:"center"}); });
+    m.onClick(() => { openSheet(); S.tab = "near"; S.focusBike = b.id; render(); document.querySelector(`[data-bike="${CSS.escape(b.id)}"]`)?.scrollIntoView({behavior:"smooth", block:"center"}); });
     return m;
   });
   busMarkers = S.buses.map(s => mk({lat: s.lat, lng: s.lon}, ICON.bus(), s.name, 5));
@@ -682,7 +800,7 @@ async function doPlan(text){
     const t = S.plan.to;
     rm(destMarker);
     destMarker = mk({lat: t.lat, lng: t.lon}, ICON.dest(), t.name, 998, true);
-    map.fitBounds([[S.me.lat, S.me.lon], [t.lat, t.lon]], pad(0.5));
+    MAP.fit([[S.me.lat, S.me.lon], [t.lat, t.lon]], 0.5);
   } catch (e) { S.planErr = e.message; }
   S.planLoading = false; render();
 }
@@ -694,8 +812,8 @@ function showRoute(key){
   const r = S.plan?.[kind]?.v?.[+i];
   if (r?.polyline){
     const path = decodePolyline(r.polyline);
-    routeLine = L.polyline(path, {color: kind === "bus" ? "#0e9f8e" : "#0070bd", weight: 6, opacity: .9}).addTo(map);
-    map.fitBounds(routeLine.getBounds(), pad(0.45));
+    routeLine = MAP.line(path, kind === "bus" ? "#0e9f8e" : "#0070bd");
+    MAP.fit(path, 0.45);
   }
   render();
 }
@@ -815,7 +933,7 @@ function render(){
   document.querySelectorAll("[data-route]").forEach(c => c.onclick = () => showRoute(c.dataset.route));
   document.querySelectorAll("[data-bike]").forEach(c => c.onclick = () => {
     const b = S.bikes.find(x => x.id === c.dataset.bike); if (!b) return;
-    S.focusBike = b.id; map.panTo({lat: b.lat, lng: b.lon}); render();
+    S.focusBike = b.id; MAP.panTo(b.lat, b.lon); render();
   });
 }
 
@@ -872,8 +990,8 @@ function hint(t, ms){ const h = $("hint"); h.textContent = t; h.style.display = 
   };
 })();
 
-$("locBtn").onclick = () => map && locate();
-$("areaBtn").onclick = () => { const c = map.getCenter(); loadNear({lat: c.lat(), lon: c.lng()}); };
+$("locBtn").onclick = () => locate();
+$("areaBtn").onclick = () => { const c = MAP.center(); loadNear({lat: c.lat, lon: c.lng}); };
 
 render();
 function openSetup(msg){
@@ -892,7 +1010,7 @@ $("kSave").onclick = async () => {
   try { await computeTransit({lat: 25.0478, lon: 121.5170}, {lat: 25.0330, lon: 121.5654}, ["SUBWAY"], new Date()); }
   catch (e) { $("kMsg").textContent = "❌ " + e.message; return; }
   $("kMsg").textContent = "✅ 全部正常！";
-  setTimeout(() => { $("setup").style.display = "none"; if (S.me) loadNear(S.me); }, 800);
+  setTimeout(() => location.reload(), 800);
 };
 
 initMap();
