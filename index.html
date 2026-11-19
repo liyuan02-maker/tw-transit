@@ -70,6 +70,9 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 .dest{font-size:28px;transform:translateY(4px)}
 #setup{position:fixed;inset:0;z-index:20;background:var(--bg);display:none;padding:24px;overflow:auto}
 #setup code{background:#fff;border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+#mapErr{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 80px);z-index:7;max-width:560px;margin:0 auto;background:#fff;border:2px solid var(--bad);border-radius:14px;padding:12px 14px;font-size:14px;line-height:1.6;box-shadow:0 4px 18px rgba(0,0,0,.15);display:none}
+#mapErr b{color:var(--bad)}
+#mapErr code{background:#f3f4f6;border-radius:4px;padding:0 4px;font-size:12px}
 </style>
 </head>
 <body>
@@ -81,6 +84,7 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
     <button id="goBtn" type="submit">出發</button>
   </form>
 </div>
+<div id="mapErr"></div>
 <button id="areaBtn">🔄 查這一區</button>
 <button class="fab" id="locBtn" title="回到我的位置">◎</button>
 
@@ -130,12 +134,39 @@ async function api(path){
   return j;
 }
 
+// ====== Google 地圖錯誤診斷 ======
+const MAP_ERR = {
+  ApiNotActivatedMapError: "Maps JavaScript API 還沒有啟用。到 Google Cloud →「API 和服務 → 程式庫」搜尋 Maps JavaScript API，按「啟用」。",
+  BillingNotEnabledMapError: "這個 Google 專案沒有綁定帳單。到 Google Cloud →「帳單」把專案連結到帳單帳戶。",
+  RefererNotAllowedMapError: "瀏覽器金鑰的「網站限制」沒有包含這個網址。請加入 <code>" + location.origin + "/*</code>",
+  InvalidKeyMapError: "金鑰不正確：可能貼錯、多了空白，或兩把 Google 金鑰放反了。檢查 Render 裡的 GOOGLE_BROWSER_KEY。",
+  ApiTargetBlockedMapError: "瀏覽器金鑰的「API 限制」沒有勾 Maps JavaScript API。到金鑰設定把它勾起來。",
+  MissingKeyMapError: "沒有讀到金鑰。檢查 Render 裡的 GOOGLE_BROWSER_KEY 後重新部署。",
+  ExpiredKeyMapError: "金鑰已過期或被刪除，請建立新的金鑰。",
+  DeletedApiProjectMapError: "金鑰所屬的 Google 專案已被刪除。",
+  ScriptLoadError: "下載不到 Google 地圖程式，請確認網路，或重新整理再試一次。",
+};
+function showMapErr(code){
+  const box = $("mapErr"); if (box.dataset.code) return;
+  box.dataset.code = code || "unknown";
+  box.innerHTML = `<b>Google 地圖無法顯示</b><br>${MAP_ERR[code] || "Google 拒絕了這把金鑰，請檢查瀏覽器金鑰的設定。"}<br><span class="mute">錯誤代碼：${esc(code || "gm_authFailure")}・改完約等 1–5 分鐘再重新整理</span>`;
+  box.style.display = "block";
+}
+window.gm_authFailure = () => setTimeout(() => showMapErr($("mapErr").dataset.pending), 300);
+(() => {
+  const ce = console.error.bind(console), cw = console.warn.bind(console);
+  const sniff = a => { const m = a.map(String).join(" ").match(/(\w+MapError)/); if (m) { $("mapErr").dataset.pending = m[1]; showMapErr(m[1]); } };
+  console.error = (...a) => { sniff(a); ce(...a); };
+  console.warn = (...a) => { sniff(a); cw(...a); };
+})();
+
 // ====== 地圖 ======
 function loadGoogle(){
   if (!window.GOOGLE_BROWSER_KEY){ $("setup").style.display = "block"; return; }
   const s = document.createElement("script");
   s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_BROWSER_KEY)}&v=weekly&language=zh-TW&region=TW&libraries=marker,geometry&callback=initMap`;
   s.async = true;
+  s.onerror = () => showMapErr("ScriptLoadError");
   document.head.appendChild(s);
 }
 
