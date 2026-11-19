@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#1c2230">
 <title>台灣大眾運輸通</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 :root{
   --ink:#1c2230; --mute:#6b7280; --line:#e6e1d6; --card:#fff; --bg:#f6f4ef;
@@ -70,6 +72,8 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 .dest{font-size:28px;transform:translateY(4px)}
 #setup{position:fixed;inset:0;z-index:20;background:var(--bg);display:none;padding:24px;overflow:auto}
 #setup code{background:#fff;border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+.leaflet-control-attribution{font-size:10px}
+.leaflet-bottom{bottom:calc(var(--sheet-h) + 2px)!important}
 #mapErr{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 80px);z-index:7;max-width:560px;margin:0 auto;background:#fff;border:2px solid var(--bad);border-radius:14px;padding:12px 14px;font-size:14px;line-height:1.6;box-shadow:0 4px 18px rgba(0,0,0,.15);display:none}
 #mapErr b{color:var(--bad)}
 #mapErr code{background:#f3f4f6;border-radius:4px;padding:0 4px;font-size:12px}
@@ -97,12 +101,8 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
   <div class="body" id="body"></div>
 </div>
 
-<div id="setup">
-  <h2>還差一步：設定金鑰</h2>
-  <p>伺服器沒有讀到 <code>GOOGLE_BROWSER_KEY</code>。請依照 README 申請 Google 與 TDX 金鑰，填進 <code>.env</code> 後重新啟動 <code>node server.js</code>。</p>
-</div>
 
-<script src="/config.js"></script>
+
 <script>
 // ====== 狀態 ======
 const S = {
@@ -134,87 +134,58 @@ async function api(path){
   return j;
 }
 
-// ====== Google 地圖錯誤診斷 ======
-const MAP_ERR = {
-  ApiNotActivatedMapError: "Maps JavaScript API 還沒有啟用。到 Google Cloud →「API 和服務 → 程式庫」搜尋 Maps JavaScript API，按「啟用」。",
-  BillingNotEnabledMapError: "這個 Google 專案沒有綁定帳單。到 Google Cloud →「帳單」把專案連結到帳單帳戶。",
-  RefererNotAllowedMapError: "瀏覽器金鑰的「網站限制」沒有包含這個網址。請加入 <code>" + location.origin + "/*</code>",
-  InvalidKeyMapError: "金鑰不正確：可能貼錯、多了空白，或兩把 Google 金鑰放反了。檢查 Render 裡的 GOOGLE_BROWSER_KEY。",
-  ApiTargetBlockedMapError: "瀏覽器金鑰的「API 限制」沒有勾 Maps JavaScript API。到金鑰設定把它勾起來。",
-  MissingKeyMapError: "沒有讀到金鑰。檢查 Render 裡的 GOOGLE_BROWSER_KEY 後重新部署。",
-  ExpiredKeyMapError: "金鑰已過期或被刪除，請建立新的金鑰。",
-  DeletedApiProjectMapError: "金鑰所屬的 Google 專案已被刪除。",
-  NoTiles: "地圖等了 8 秒還沒出來，但 Google 沒有回報原因。最常見是：① 專案沒綁帳單 ② Maps JavaScript API 沒啟用 ③ 瀏覽器金鑰的網站限制沒有 <code>" + location.origin + "/*</code>。可以先把金鑰的「應用程式限制」改成「無」測試。",
-  InitError: "地圖程式啟動失敗。",
-  ScriptLoadError: "下載不到 Google 地圖程式，請確認網路，或重新整理再試一次。",
-};
-function showMapErr(code, extra){
-  const box = $("mapErr"); if (box.dataset.code) return;
-  box.dataset.code = code || "unknown";
-  box.innerHTML = `<b>Google 地圖無法顯示</b><br>${MAP_ERR[code] || "Google 拒絕了這把金鑰，請檢查瀏覽器金鑰的設定。"}<br>${extra ? `<br><span class="mute">${esc(extra)}</span>` : ""}<br><span class="mute">錯誤代碼：${esc(code || "gm_authFailure")}・版本 ${VERSION}・改完約等 1–5 分鐘再重新整理</span>`;
+// ====== 地圖（OpenStreetMap，免金鑰）======
+const VERSION = "v5";
+function showMapErr(msg){
+  const box = $("mapErr");
+  box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>地圖載入有問題</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
   box.style.display = "block";
 }
-window.gm_authFailure = () => setTimeout(() => showMapErr($("mapErr").dataset.pending), 300);
-(() => {
-  const ce = console.error.bind(console), cw = console.warn.bind(console);
-  const sniff = a => { const m = a.map(String).join(" ").match(/(\w+MapError)/); if (m) { $("mapErr").dataset.pending = m[1]; showMapErr(m[1]); } };
-  console.error = (...a) => { sniff(a); ce(...a); };
-  console.warn = (...a) => { sniff(a); cw(...a); };
-})();
 
-// ====== 地圖 ======
-function loadGoogle(){
-  if (!window.GOOGLE_BROWSER_KEY){ $("setup").style.display = "block"; return; }
-  const s = document.createElement("script");
-  s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_BROWSER_KEY)}&v=weekly&language=zh-TW&region=TW&libraries=geometry&callback=initMap`;
-  s.async = true;
-  s.onerror = () => showMapErr("ScriptLoadError");
-  document.head.appendChild(s);
-}
-
-const VERSION = "v3";
-window.initMap = () => {
-  try {
-    map = new google.maps.Map($("map"), {
-      center: {lat: 25.0478, lng: 121.5170}, zoom: 16,
-      disableDefaultUI: true, clickableIcons: false, gestureHandling: "greedy",
-    });
-  } catch (e) { showMapErr("InitError", e.message); return; }
-  // 8 秒內地圖圖磚沒有出來，就顯示診斷訊息
-  let tilesOk = false;
-  map.addListener("tilesloaded", () => { tilesOk = true; $("mapErr").style.display = "none"; });
-  setTimeout(() => { if (!tilesOk) showMapErr($("mapErr").dataset.pending || "NoTiles"); }, 8000);
-  map.addListener("idle", () => {
+function initMap(){
+  if (!window.L){ showMapErr("下載不到地圖程式，請確認網路後重新整理。"); return; }
+  map = L.map("map", {zoomControl: false, attributionControl: true}).setView([25.0478, 121.5170], 16);
+  let tileErr = 0;
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).on("tileerror", () => { if (++tileErr === 6) showMapErr("地圖圖片下載失敗，可能被廣告阻擋器或網路擋住。"); })
+    .addTo(map);
+  map.on("moveend", () => {
     if (!S.area) return;
-    const c = map.getCenter();
-    const far = google.maps.geometry.spherical.computeDistanceBetween(c, new google.maps.LatLng(S.area.lat, S.area.lon)) > 400;
+    const far = map.distance(map.getCenter(), L.latLng(S.area.lat, S.area.lon)) > 400;
     $("areaBtn").style.display = far && map.getZoom() >= 14 ? "block" : "none";
   });
   locate();
-};
+}
 
-function svgIcon(svg, w, h, ax, ay){
-  return { url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
-    scaledSize: new google.maps.Size(w, h), anchor: new google.maps.Point(ax ?? w/2, ay ?? h/2) };
+// 標記：用 HTML 做成圖示
+function mk(pos, html, title, z, anchorBottom){
+  const icon = L.divIcon({className: "", iconSize: null,
+    html: `<div style="transform:translate(-50%,${anchorBottom ? "-100%" : "-50%"})" title="${esc(title || "")}">${html}</div>`});
+  return L.marker([pos.lat, pos.lng], {icon, zIndexOffset: z || 0, keyboard: false}).addTo(map);
 }
-function mk(pos, icon, title, z){
-  return new google.maps.Marker({map, position: pos, icon, title: title || "", zIndex: z || 1, optimized: false});
-}
-function rm(m){ if (m) m.setMap(null); }
+function rm(m){ if (m) m.remove(); }
 const ICON = {
-  me: () => svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34"><circle cx="17" cy="17" r="16" fill="#2563eb" fill-opacity=".18"/><circle cx="17" cy="17" r="8" fill="#2563eb" stroke="#fff" stroke-width="3"/></svg>`, 34, 34),
-  bus: () => svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><circle cx="9" cy="9" r="7" fill="#0e9f8e" stroke="#fff" stroke-width="2.5"/></svg>`, 18, 18),
-  dest: () => svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" width="30" height="40" viewBox="0 0 30 40"><path d="M15 1C7 1 1 7 1 15c0 10 14 24 14 24s14-14 14-24C29 7 23 1 15 1z" fill="#dc2626" stroke="#fff" stroke-width="2"/><circle cx="15" cy="15" r="5" fill="#fff"/></svg>`, 30, 40, 15, 39),
-  bike: (b, color) => {
-    const t = `${b.bikes ?? "?"}`, d = `空${b.docks ?? "?"}`;
-    const w = 66 + (t.length + d.length - 1) * 8;
-    return svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="28">
-      <rect x="1.5" y="1.5" width="${w-3}" height="25" rx="12.5" fill="#fff" stroke="${color}" stroke-width="3"/>
-      <circle cx="14" cy="14" r="9" fill="${color}"/>
-      <text x="14" y="18" font-size="11" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-weight="700">YB</text>
-      <text x="28" y="19" font-size="13" font-weight="700" fill="#1c2230" font-family="system-ui,sans-serif">${t}<tspan fill="#6b7280" font-weight="500"> / ${d}</tspan></text></svg>`, w, 28);
-  },
+  me: () => `<div class="me"></div>`,
+  bus: () => `<div class="busdot"></div>`,
+  dest: () => `<svg width="30" height="40" viewBox="0 0 30 40" style="display:block"><path d="M15 1C7 1 1 7 1 15c0 10 14 24 14 24s14-14 14-24C29 7 23 1 15 1z" fill="#dc2626" stroke="#fff" stroke-width="2"/><circle cx="15" cy="15" r="5" fill="#fff"/></svg>`,
+  bike: (b, color) => `<div class="bk" style="--c:${color}"><span class="ic">🚲</span>${b.bikes ?? "?"}<span class="sp">/ 空${b.docks ?? "?"}</span></div>`,
 };
+// Google 路線線條解碼
+function decodePolyline(str){
+  let i = 0, lat = 0, lng = 0; const out = [];
+  while (i < str.length){
+    for (const k of [0, 1]){
+      let r = 0, sh = 0, b;
+      do { b = str.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32);
+      const d = (r & 1) ? ~(r >> 1) : (r >> 1);
+      if (k === 0) lat += d; else lng += d;
+    }
+    out.push([lat / 1e5, lng / 1e5]);
+  }
+  return out;
+}
+const pad = f => ({paddingTopLeft: [30, 90], paddingBottomRight: [30, window.innerHeight * f]});
 function el(html){ const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; }
 
 function locate(){
@@ -264,7 +235,7 @@ function drawNearMarkers(){
   bikeMarkers.forEach(rm); busMarkers.forEach(rm);
   bikeMarkers = S.bikes.map(b => {
     const m = mk({lat: b.lat, lng: b.lon}, ICON.bike(b, bikeColor(b)), b.name, 10);
-    m.addListener("click", () => { openSheet(); S.tab = "near"; S.focusBike = b.id; render(); document.querySelector(`[data-bike="${CSS.escape(b.id)}"]`)?.scrollIntoView({behavior:"smooth", block:"center"}); });
+    m.on("click", () => { openSheet(); S.tab = "near"; S.focusBike = b.id; render(); document.querySelector(`[data-bike="${CSS.escape(b.id)}"]`)?.scrollIntoView({behavior:"smooth", block:"center"}); });
     return m;
   });
   busMarkers = S.buses.map(s => mk({lat: s.lat, lng: s.lon}, ICON.bus(), s.name, 5));
@@ -279,24 +250,21 @@ async function doPlan(text){
     S.plan = await api(`/api/plan?lat=${S.me.lat}&lon=${S.me.lon}&to=${encodeURIComponent(text)}`);
     const t = S.plan.to;
     rm(destMarker);
-    destMarker = mk({lat: t.lat, lng: t.lon}, ICON.dest(), t.name, 998);
-    const bounds = new google.maps.LatLngBounds();
-    bounds.extend({lat: S.me.lat, lng: S.me.lon}); bounds.extend({lat: t.lat, lng: t.lon});
-    map.fitBounds(bounds, {top: 90, bottom: window.innerHeight * 0.5, left: 30, right: 30});
+    destMarker = mk({lat: t.lat, lng: t.lon}, ICON.dest(), t.name, 998, true);
+    map.fitBounds([[S.me.lat, S.me.lon], [t.lat, t.lon]], pad(0.5));
   } catch (e) { S.planErr = e.message; }
   S.planLoading = false; render();
 }
 
-function clearRoute(){ if (routeLine){ routeLine.setMap(null); routeLine = null; } }
+function clearRoute(){ if (routeLine){ routeLine.remove(); routeLine = null; } }
 function showRoute(key){
   clearRoute(); S.selected = key;
   const [kind, i] = key.split(":");
   const r = S.plan?.[kind]?.v?.[+i];
   if (r?.polyline){
-    const path = google.maps.geometry.encoding.decodePath(r.polyline);
-    routeLine = new google.maps.Polyline({map, path, strokeColor: kind === "bus" ? "#0e9f8e" : "#0070bd", strokeWeight: 6, strokeOpacity: .9});
-    const b = new google.maps.LatLngBounds(); path.forEach(p => b.extend(p));
-    map.fitBounds(b, {top: 90, bottom: window.innerHeight * 0.45, left: 30, right: 30});
+    const path = decodePolyline(r.polyline);
+    routeLine = L.polyline(path, {color: kind === "bus" ? "#0e9f8e" : "#0070bd", weight: 6, opacity: .9}).addTo(map);
+    map.fitBounds(routeLine.getBounds(), pad(0.45));
   }
   render();
 }
@@ -364,7 +332,7 @@ function render(){
     h += S.buses.length ? S.buses.map(s => `<div class="card">
         <div class="row"><b style="flex:1">${esc(s.name)}</b><span class="mute">🚶 ${s.walk} 分（${s.dist} m）</span></div>
         ${s.arrivals.length ? `<div class="eta">${s.arrivals.slice(0, 8).map(a => `
-          <span>${esc(a.route)}</span>
+          <span>${esc(a.route)}${s.arrivals.filter(x => x.route === a.route).length > 1 ? `<span class="mute">（${a.dir === 1 ? "返程" : "去程"}）</span>` : ""}</span>
           <b class="${a.min != null && a.min <= 3 ? "soon" : ""}">${a.min != null ? (a.min <= 1 ? "進站中" : a.min + " 分") : `<span class="mute">${esc(a.status)}</span>`}</b>`).join("")}</div>`
           : `<div class="empty">目前沒有到站資料</div>`}
       </div>`).join("") : (S.nearLoading ? "" : `<div class="empty">附近 400 公尺內沒有公車站</div>`);
@@ -428,7 +396,7 @@ $("locBtn").onclick = () => map && locate();
 $("areaBtn").onclick = () => { const c = map.getCenter(); loadNear({lat: c.lat(), lon: c.lng()}); };
 
 render();
-loadGoogle();
+initMap();
 </script>
 </body>
 </html>
