@@ -136,6 +136,8 @@ const LS = {
   set(k, v){ try { localStorage.setItem("tt_" + k, JSON.stringify(v)); } catch (e) {} },
 };
 let KEYS = LS.get("keys") || {};
+// 清掉過期的快取
+try { for (const k of Object.keys(localStorage)) if (k.startsWith("tt_c_")) { const v = JSON.parse(localStorage.getItem(k)); if (!v || v.exp < Date.now()) localStorage.removeItem(k); } } catch (e) {}
 async function lsCached(key, ttlSec, fn){
   const hit = LS.get("c_" + key);
   if (hit && hit.exp > Date.now()) return hit.val;
@@ -198,7 +200,8 @@ async function getTdxToken() {
 }
 
 // TDX 免費會員每秒呼叫次數有限：所有請求排隊，每次間隔 TDX_GAP 毫秒
-const TDX_GAP = 350;
+const TDX_GAP = 700;
+let tdxCooldown = 0; // 被擋之後暫停到這個時間
 let tdxQueue = Promise.resolve();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function tdxSlot() {
@@ -210,6 +213,7 @@ function tdxSlot() {
 async function tdx(pathAndQuery) {
   const sep = pathAndQuery.includes("?") ? "&" : "?";
   const url = `${TDX}${pathAndQuery}${sep}$format=JSON`;
+  if (Date.now() < tdxCooldown) throw new Error(`TDX 暫時限流，約 ${Math.ceil((tdxCooldown - Date.now()) / 1000)} 秒後自動恢復`);
   for (let attempt = 0; attempt < 4; attempt++) {
     const token = await getTdxToken();
     await tdxSlot();
@@ -218,8 +222,9 @@ async function tdx(pathAndQuery) {
     });
     if (res.status === 401 && attempt === 0) { tdxToken = null; LS.set("tdxToken", null); continue; }
     if (res.status === 429) {           // 太頻繁：等一下再試
-      if (attempt < 3) { await sleep(1200 * (attempt + 1)); continue; }
-      throw new Error("TDX 呼叫太頻繁，請稍後再試");
+      if (attempt < 3) { await sleep(2000 * 2 ** attempt); continue; }   // 等 2、4、8 秒
+      tdxCooldown = Date.now() + 60000;
+      throw new Error("TDX 暫時限流，約 60 秒後自動恢復");
     }
     if (!res.ok) throw new Error(`TDX 錯誤 ${res.status}：${pathAndQuery.split("?")[0]}`);
     return res.json();
@@ -230,9 +235,9 @@ const near = (lat, lon, r) => `$spatialFilter=nearby(${lat},${lon},${r})`;
 // ---------- YouBike ----------
 async function bikeNearby(lat, lon) {
   const key = `bike:${lat.toFixed(3)},${lon.toFixed(3)}`;
-  return cached(key, 30, async () => {
+  return cached(key, 55, async () => {
     const [stations, avail] = await Promise.all([
-      cached(`bikeSt:${lat.toFixed(3)},${lon.toFixed(3)}`, 3600,
+      lsCached(`bikeSt:${lat.toFixed(3)},${lon.toFixed(3)}`, 86400,
         () => tdx(`/advanced/v2/Bike/Station/NearBy?${near(lat, lon, 600)}`)),
       tdx(`/advanced/v2/Bike/Availability/NearBy?${near(lat, lon, 600)}`),
     ]);
@@ -265,8 +270,8 @@ const CITY = {
 
 async function busNearby(lat, lon) {
   const key = `bus:${lat.toFixed(3)},${lon.toFixed(3)}`;
-  return cached(key, 20, async () => {
-    const stops = await cached(`busSt:${lat.toFixed(3)},${lon.toFixed(3)}`, 3600,
+  return cached(key, 55, async () => {
+    const stops = await lsCached(`busSt:${lat.toFixed(3)},${lon.toFixed(3)}`, 86400,
       () => tdx(`/advanced/v2/Bus/Stop/NearBy?${near(lat, lon, 400)}&$top=40`));
 
     // 以站名分組，取最近的 3 個站牌
@@ -565,7 +570,7 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "p2";
+const VERSION = "p3";
 function showMapErr(msg){
   const box = $("mapErr");
   box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>地圖載入有問題</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
@@ -770,7 +775,7 @@ async function loadNear(pt, quiet){
   S.nearLoading = false;
   drawNearMarkers(); render();
   clearInterval(timer);
-  timer = setInterval(() => { if (!document.hidden && S.area) loadNear(S.area, true); }, 30000);
+  timer = setInterval(() => { if (!document.hidden && S.area && S.tab === "near" && Date.now() > tdxCooldown) loadNear(S.area, true); }, 60000);
 }
 
 function bikeColor(b){
@@ -889,7 +894,7 @@ function render(){
     if (S.nearLoading) h += `<div class="empty"><span class="spin"></span> 讀取附近資料…</div>`;
     if (S.nearErr) h += `<div class="err">${esc(S.nearErr)}</div>`;
     // 公車
-    h += `<div class="sec"><h3><i style="background:var(--bus)"></i>最近的公車站牌<small>每 30 秒更新</small></h3>`;
+    h += `<div class="sec"><h3><i style="background:var(--bus)"></i>最近的公車站牌<small>每 60 秒更新</small></h3>`;
     h += S.buses.length ? S.buses.map(s => `<div class="card">
         <div class="row"><b style="flex:1">${esc(s.name)}</b><span class="mute">🚶 ${s.walk} 分（${s.dist} m）</span></div>
         ${s.arrivals.length ? `<div class="eta">${s.arrivals.slice(0, 8).map(a => `
