@@ -125,28 +125,15 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 
 
 
-<div id="setup">
-  <div class="setupbox">
-    <h2>設定金鑰</h2>
-    <p class="mute">金鑰只會存在這支手機的瀏覽器裡，不會上傳到任何地方。</p>
-    <label>TDX Client Id</label><input id="kTdxId" autocomplete="off" autocapitalize="off" spellcheck="false">
-    <label>TDX Client Secret</label><input id="kTdxSecret" autocomplete="off" autocapitalize="off" spellcheck="false">
-    <label>Google 金鑰（Maps JavaScript API + Routes API）</label><input id="kGoogle" autocomplete="off" autocapitalize="off" spellcheck="false">
-    <div id="kMsg" class="mute" style="min-height:20px;margin:8px 0"></div>
-    <div style="display:flex;gap:8px">
-      <button id="kSave" class="sbtn">儲存並測試</button>
-      <button id="kClose" class="sbtn ghost">關閉</button>
-    </div>
-  </div>
-</div>
-
 <script>
 // ====== 金鑰與本機儲存 ======
 const LS = {
   get(k){ try { return JSON.parse(localStorage.getItem("tt_" + k)); } catch (e) { return null; } },
   set(k, v){ try { localStorage.setItem("tt_" + k, JSON.stringify(v)); } catch (e) {} },
 };
-let KEYS = LS.get("keys") || {};
+// 金鑰放在 Cloudflare Worker，朋友不用填
+const WORKER = "https://tw-transit-api.liyuan02.workers.dev";
+let KEYS = {};
 // 清掉過期的快取
 try { for (const k of Object.keys(localStorage)) if (k.startsWith("tt_c_")) { const v = JSON.parse(localStorage.getItem(k)); if (!v || v.exp < Date.now()) localStorage.removeItem(k); } } catch (e) {}
 async function lsCached(key, ttlSec, fn){
@@ -190,28 +177,8 @@ function taipeiNow() {
 const hmToMin = s => { const [h, m] = s.split(":").map(Number); return h * 60 + m; };
 
 // ---------- TDX ----------
-let tdxToken = LS.get("tdxToken"), tdxTokenExp = LS.get("tdxTokenExp") || 0;
-async function getTdxToken() {
-  if (tdxToken && Date.now() < tdxTokenExp) return tdxToken;
-  const TDX_CLIENT_ID = KEYS.tdxId, TDX_CLIENT_SECRET = KEYS.tdxSecret;
-  if (!TDX_CLIENT_ID || !TDX_CLIENT_SECRET) throw new Error("尚未設定 TDX 金鑰（點下方 ⚙️ 設定）");
-  const res = await fetch("https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token", {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "client_credentials", client_id: TDX_CLIENT_ID, client_secret: TDX_CLIENT_SECRET,
-    }),
-  });
-  if (!res.ok) throw new Error(`TDX 登入失敗 (${res.status})，請檢查 TDX 金鑰`);
-  const j = await res.json();
-  tdxToken = j.access_token;
-  tdxTokenExp = Date.now() + (j.expires_in - 300) * 1000;
-  LS.set("tdxToken", tdxToken); LS.set("tdxTokenExp", tdxTokenExp);
-  return tdxToken;
-}
-
 // TDX 免費會員每秒呼叫次數有限：所有請求排隊，每次間隔 TDX_GAP 毫秒
-const TDX_GAP = 700;
+const TDX_GAP = 300;
 const NEAR_M = 200; // 附近範圍（公尺）
 let tdxCooldown = 0; // 被擋之後暫停到這個時間
 let tdxQueue = Promise.resolve();
@@ -223,22 +190,18 @@ function tdxSlot() {
 }
 
 async function tdx(pathAndQuery) {
-  const sep = pathAndQuery.includes("?") ? "&" : "?";
-  const url = `${TDX}${pathAndQuery}${sep}$format=JSON`;
   if (Date.now() < tdxCooldown) throw new Error(`TDX 暫時限流，約 ${Math.ceil((tdxCooldown - Date.now()) / 1000)} 秒後自動恢復`);
+  const url = WORKER + "/tdx" + pathAndQuery;
   for (let attempt = 0; attempt < 4; attempt++) {
-    const token = await getTdxToken();
     await tdxSlot();
-    const res = await fetch(url, {
-      headers: { authorization: `Bearer ${token}` },
-    });
-    if (res.status === 401 && attempt === 0) { tdxToken = null; LS.set("tdxToken", null); continue; }
+    let res;
+    try { res = await fetch(url); } catch (e) { throw new Error("連不到資料伺服器，請確認網路"); }
     if (res.status === 429) {           // 太頻繁：等一下再試
       if (attempt < 3) { await sleep(2000 * 2 ** attempt); continue; }   // 等 2、4、8 秒
       tdxCooldown = Date.now() + 60000;
       throw new Error("TDX 暫時限流，約 60 秒後自動恢復");
     }
-    if (!res.ok) throw new Error(`TDX 錯誤 ${res.status}：${pathAndQuery.split("?")[0]}`);
+    if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || `TDX 錯誤 ${res.status}`); }
     return res.json();
   }
 }
@@ -435,7 +398,7 @@ const FIELD_MASK = [
 
 async function computeTransit(from, to, modes, departureTime) {
   const GOOGLE_SERVER_KEY = KEYS.google;
-  if (!GOOGLE_SERVER_KEY) throw new Error("尚未設定 Google 金鑰（點下方 ⚙️ 設定）");
+  if (!GOOGLE_SERVER_KEY) throw new Error("沒有 Google 金鑰（資料伺服器沒有回應）");
   const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
     method: "POST",
     headers: {
@@ -582,7 +545,7 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "p5";
+const VERSION = "w1";
 function showMapErr(msg){
   const box = $("mapErr");
   box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>地圖載入有問題</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
@@ -776,7 +739,6 @@ function placeMe(){
 
 // ====== 附近：YouBike + 公車 ======
 async function loadNear(pt, quiet){
-  if (!KEYS.tdxId) return;
   S.area = pt; $("areaBtn").style.display = "none";
   if (!quiet){ S.nearLoading = true; S.nearErr = null; render(); }
   const q = `lat=${pt.lat}&lon=${pt.lon}`;
@@ -946,9 +908,8 @@ function render(){
       h += railSec("thsr", "高鐵", "var(--hsr)", p.thsr);
     }
   }
-  h += `<div class="mute" style="text-align:center;margin-top:8px;font-size:12px">版本 ${VERSION}・<a href="#" id="openSetup" style="color:inherit">⚙️ 金鑰設定</a></div>`;
+  h += `<div class="mute" style="text-align:center;margin-top:8px;font-size:12px">版本 ${VERSION}</div>`;
   $("body").innerHTML = h;
-  const os = $("openSetup"); if (os) os.onclick = e => { e.preventDefault(); openSetup(); };
   document.querySelectorAll("[data-route]").forEach(c => c.onclick = () => showRoute(c.dataset.route));
   document.querySelectorAll("[data-bike]").forEach(c => c.onclick = () => {
     const b = S.bikes.find(x => x.id === c.dataset.bike); if (!b) return;
@@ -1091,27 +1052,16 @@ $("locBtn").onclick = () => locate();
 $("areaBtn").onclick = () => { const c = MAP.center(); loadNear({lat: c.lat, lon: c.lng}); };
 
 render();
-function openSetup(msg){
-  $("kTdxId").value = KEYS.tdxId || ""; $("kTdxSecret").value = KEYS.tdxSecret || ""; $("kGoogle").value = KEYS.google || "";
-  $("kMsg").textContent = msg || ""; $("kClose").style.display = KEYS.tdxId ? "" : "none";
-  $("setup").style.display = "block";
-}
-$("kClose").onclick = () => $("setup").style.display = "none";
-$("kSave").onclick = async () => {
-  KEYS = { tdxId: $("kTdxId").value.trim(), tdxSecret: $("kTdxSecret").value.trim(), google: $("kGoogle").value.trim() };
-  if (!KEYS.tdxId || !KEYS.tdxSecret || !KEYS.google){ $("kMsg").textContent = "三個欄位都要填"; return; }
-  LS.set("keys", KEYS); LS.set("tdxToken", null); tdxToken = null; cache.clear();
-  $("kMsg").textContent = "測試 TDX 中…";
-  try { await getTdxToken(); } catch (e) { $("kMsg").textContent = "❌ " + e.message; return; }
-  $("kMsg").textContent = "✅ TDX 正常，測試 Google 中…";
-  try { await computeTransit({lat: 25.0478, lon: 121.5170}, {lat: 25.0330, lon: 121.5654}, ["SUBWAY"], new Date()); }
-  catch (e) { $("kMsg").textContent = "❌ " + e.message; return; }
-  $("kMsg").textContent = "✅ 全部正常！";
-  setTimeout(() => location.reload(), 800);
-};
-
-initMap();
-if (!KEYS.tdxId || !KEYS.google) openSetup("第一次使用，請貼上金鑰（只需要做一次）");
+(async () => {
+  try {
+    const r = await fetch(WORKER + "/config");
+    if (!r.ok) throw new Error(r.status);
+    KEYS = await r.json();
+  } catch (e) {
+    notice("連不到資料伺服器，地圖與查詢可能無法使用。");
+  }
+  initMap();
+})();
 </script>
 </body>
 </html>
