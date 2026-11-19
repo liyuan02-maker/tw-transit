@@ -144,12 +144,14 @@ const MAP_ERR = {
   MissingKeyMapError: "沒有讀到金鑰。檢查 Render 裡的 GOOGLE_BROWSER_KEY 後重新部署。",
   ExpiredKeyMapError: "金鑰已過期或被刪除，請建立新的金鑰。",
   DeletedApiProjectMapError: "金鑰所屬的 Google 專案已被刪除。",
+  NoTiles: "地圖等了 8 秒還沒出來，但 Google 沒有回報原因。最常見是：① 專案沒綁帳單 ② Maps JavaScript API 沒啟用 ③ 瀏覽器金鑰的網站限制沒有 <code>" + location.origin + "/*</code>。可以先把金鑰的「應用程式限制」改成「無」測試。",
+  InitError: "地圖程式啟動失敗。",
   ScriptLoadError: "下載不到 Google 地圖程式，請確認網路，或重新整理再試一次。",
 };
-function showMapErr(code){
+function showMapErr(code, extra){
   const box = $("mapErr"); if (box.dataset.code) return;
   box.dataset.code = code || "unknown";
-  box.innerHTML = `<b>Google 地圖無法顯示</b><br>${MAP_ERR[code] || "Google 拒絕了這把金鑰，請檢查瀏覽器金鑰的設定。"}<br><span class="mute">錯誤代碼：${esc(code || "gm_authFailure")}・改完約等 1–5 分鐘再重新整理</span>`;
+  box.innerHTML = `<b>Google 地圖無法顯示</b><br>${MAP_ERR[code] || "Google 拒絕了這把金鑰，請檢查瀏覽器金鑰的設定。"}<br>${extra ? `<br><span class="mute">${esc(extra)}</span>` : ""}<br><span class="mute">錯誤代碼：${esc(code || "gm_authFailure")}・版本 ${VERSION}・改完約等 1–5 分鐘再重新整理</span>`;
   box.style.display = "block";
 }
 window.gm_authFailure = () => setTimeout(() => showMapErr($("mapErr").dataset.pending), 300);
@@ -164,19 +166,24 @@ window.gm_authFailure = () => setTimeout(() => showMapErr($("mapErr").dataset.pe
 function loadGoogle(){
   if (!window.GOOGLE_BROWSER_KEY){ $("setup").style.display = "block"; return; }
   const s = document.createElement("script");
-  s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_BROWSER_KEY)}&v=weekly&language=zh-TW&region=TW&libraries=marker,geometry&callback=initMap`;
+  s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_BROWSER_KEY)}&v=weekly&language=zh-TW&region=TW&libraries=geometry&callback=initMap`;
   s.async = true;
   s.onerror = () => showMapErr("ScriptLoadError");
   document.head.appendChild(s);
 }
 
-window.initMap = async () => {
-  M = await google.maps.importLibrary("marker");
-  map = new google.maps.Map($("map"), {
-    center: {lat: 25.0478, lng: 121.5170}, zoom: 16,
-    mapId: "DEMO_MAP_ID",           // 可換成你自己的 Map ID
-    disableDefaultUI: true, clickableIcons: false, gestureHandling: "greedy",
-  });
+const VERSION = "v3";
+window.initMap = () => {
+  try {
+    map = new google.maps.Map($("map"), {
+      center: {lat: 25.0478, lng: 121.5170}, zoom: 16,
+      disableDefaultUI: true, clickableIcons: false, gestureHandling: "greedy",
+    });
+  } catch (e) { showMapErr("InitError", e.message); return; }
+  // 8 秒內地圖圖磚沒有出來，就顯示診斷訊息
+  let tilesOk = false;
+  map.addListener("tilesloaded", () => { tilesOk = true; $("mapErr").style.display = "none"; });
+  setTimeout(() => { if (!tilesOk) showMapErr($("mapErr").dataset.pending || "NoTiles"); }, 8000);
   map.addListener("idle", () => {
     if (!S.area) return;
     const c = map.getCenter();
@@ -186,6 +193,28 @@ window.initMap = async () => {
   locate();
 };
 
+function svgIcon(svg, w, h, ax, ay){
+  return { url: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg),
+    scaledSize: new google.maps.Size(w, h), anchor: new google.maps.Point(ax ?? w/2, ay ?? h/2) };
+}
+function mk(pos, icon, title, z){
+  return new google.maps.Marker({map, position: pos, icon, title: title || "", zIndex: z || 1, optimized: false});
+}
+function rm(m){ if (m) m.setMap(null); }
+const ICON = {
+  me: () => svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34"><circle cx="17" cy="17" r="16" fill="#2563eb" fill-opacity=".18"/><circle cx="17" cy="17" r="8" fill="#2563eb" stroke="#fff" stroke-width="3"/></svg>`, 34, 34),
+  bus: () => svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><circle cx="9" cy="9" r="7" fill="#0e9f8e" stroke="#fff" stroke-width="2.5"/></svg>`, 18, 18),
+  dest: () => svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" width="30" height="40" viewBox="0 0 30 40"><path d="M15 1C7 1 1 7 1 15c0 10 14 24 14 24s14-14 14-24C29 7 23 1 15 1z" fill="#dc2626" stroke="#fff" stroke-width="2"/><circle cx="15" cy="15" r="5" fill="#fff"/></svg>`, 30, 40, 15, 39),
+  bike: (b, color) => {
+    const t = `${b.bikes ?? "?"}`, d = `空${b.docks ?? "?"}`;
+    const w = 66 + (t.length + d.length - 1) * 8;
+    return svgIcon(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="28">
+      <rect x="1.5" y="1.5" width="${w-3}" height="25" rx="12.5" fill="#fff" stroke="${color}" stroke-width="3"/>
+      <circle cx="14" cy="14" r="9" fill="${color}"/>
+      <text x="14" y="18" font-size="11" text-anchor="middle" fill="#fff" font-family="system-ui,sans-serif" font-weight="700">YB</text>
+      <text x="28" y="19" font-size="13" font-weight="700" fill="#1c2230" font-family="system-ui,sans-serif">${t}<tspan fill="#6b7280" font-weight="500"> / ${d}</tspan></text></svg>`, w, 28);
+  },
+};
 function el(html){ const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; }
 
 function locate(){
@@ -204,8 +233,8 @@ function useFallback(msg){
   loadNear(S.me);
 }
 function placeMe(){
-  if (meMarker) meMarker.map = null;
-  meMarker = new M.AdvancedMarkerElement({map, position: {lat: S.me.lat, lng: S.me.lon}, content: el(`<div class="me"></div>`), zIndex: 999});
+  rm(meMarker);
+  meMarker = mk({lat: S.me.lat, lng: S.me.lon}, ICON.me(), "我的位置", 999);
 }
 
 // ====== 附近：YouBike + 公車 ======
@@ -225,22 +254,20 @@ async function loadNear(pt, quiet){
 
 function bikeColor(b){
   if (b.service !== 1) return "#9ca3af";
-  if (!b.bikes) return "var(--bad)";
-  if (b.bikes < 3) return "var(--warn)";
-  return "var(--ok)";
+  if (!b.bikes) return "#dc2626";
+  if (b.bikes < 3) return "#f59e0b";
+  return "#16a34a";
 }
 
 function drawNearMarkers(){
-  bikeMarkers.forEach(m => m.map = null); busMarkers.forEach(m => m.map = null);
+  if (!map) return;
+  bikeMarkers.forEach(rm); busMarkers.forEach(rm);
   bikeMarkers = S.bikes.map(b => {
-    const m = new M.AdvancedMarkerElement({
-      map, position: {lat: b.lat, lng: b.lon}, title: b.name,
-      content: el(`<div class="bk" style="--c:${bikeColor(b)}"><span class="ic">🚲</span>${b.bikes ?? "?"}<span class="sp">/ 空${b.docks ?? "?"}</span></div>`),
-    });
+    const m = mk({lat: b.lat, lng: b.lon}, ICON.bike(b, bikeColor(b)), b.name, 10);
     m.addListener("click", () => { openSheet(); S.tab = "near"; S.focusBike = b.id; render(); document.querySelector(`[data-bike="${CSS.escape(b.id)}"]`)?.scrollIntoView({behavior:"smooth", block:"center"}); });
     return m;
   });
-  busMarkers = S.buses.map(s => new M.AdvancedMarkerElement({map, position: {lat: s.lat, lng: s.lon}, title: s.name, content: el(`<div class="busdot"></div>`)}));
+  busMarkers = S.buses.map(s => mk({lat: s.lat, lng: s.lon}, ICON.bus(), s.name, 5));
 }
 
 // ====== 路線規劃 ======
@@ -251,8 +278,8 @@ async function doPlan(text){
   try {
     S.plan = await api(`/api/plan?lat=${S.me.lat}&lon=${S.me.lon}&to=${encodeURIComponent(text)}`);
     const t = S.plan.to;
-    if (destMarker) destMarker.map = null;
-    destMarker = new M.AdvancedMarkerElement({map, position: {lat: t.lat, lng: t.lon}, title: t.name, content: el(`<div class="dest">📍</div>`)});
+    rm(destMarker);
+    destMarker = mk({lat: t.lat, lng: t.lon}, ICON.dest(), t.name, 998);
     const bounds = new google.maps.LatLngBounds();
     bounds.extend({lat: S.me.lat, lng: S.me.lon}); bounds.extend({lat: t.lat, lng: t.lon});
     map.fitBounds(bounds, {top: 90, bottom: window.innerHeight * 0.5, left: 30, right: 30});
@@ -371,6 +398,7 @@ function render(){
       h += railSec("thsr", "高鐵", "var(--hsr)", p.thsr);
     }
   }
+  h += `<div class="mute" style="text-align:center;margin-top:8px;font-size:11px">版本 ${VERSION}</div>`;
   $("body").innerHTML = h;
   document.querySelectorAll("[data-route]").forEach(c => c.onclick = () => showRoute(c.dataset.route));
   document.querySelectorAll("[data-bike]").forEach(c => c.onclick = () => {

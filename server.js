@@ -404,7 +404,7 @@ http.createServer(async (req, res) => {
       const a = path.join(__dirname, "public", "index.html"), b = path.join(__dirname, "index.html");
       return fs.readFile(fs.existsSync(a) ? a : b, (err, buf) => {
         if (err) return send(res, 404, { error: "找不到 index.html" });
-        res.writeHead(200, { "content-type": MIME[".html"] }); res.end(buf);
+        res.writeHead(200, { "content-type": MIME[".html"], "cache-control": "no-cache" }); res.end(buf);
       });
     }
     const file = path.join(__dirname, "public", path.normalize(u.pathname));
