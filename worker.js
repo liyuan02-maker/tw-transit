@@ -99,8 +99,15 @@ export default {
     // GitHub Actions 每 6 小時取得 TDX 憑證後送到這裡（需要 ADMIN_KEY）
     if (url.pathname === "/set-token" && req.method === "POST") {
       if (!(await adminOK(env, req.headers.get("x-admin-key") || ""))) return json({ error: "forbidden" }, 403, origin);
-      const j = await req.json().catch(() => ({}));
-      if (!j.access_token || !j.expires_in) return json({ error: "bad token" }, 400, origin);
+      const raw = await req.text();
+      let j = {};
+      try { j = JSON.parse(raw); } catch (_) { try { j = Object.fromEntries(new URLSearchParams(raw)); } catch (__) {} }
+      if (j && j.access_token && !j.expires_in) j.expires_in = 86400;
+      if (!j || !j.access_token) {
+        const hint = raw.trim() === "resp.json" ? "排程檔裡 --data 後面少了 @（要寫 --data @resp.json）" : "";
+        return json({ error: "bad token", hint, length: raw.length, start: raw.slice(0, 25), keys: j ? Object.keys(j).slice(0, 6) : [] }, 400, origin);
+      }
+      j.expires_in = Number(j.expires_in);
       token = j.access_token;
       tokenExp = Date.now() + (j.expires_in - 600) * 1000;
       await env.TOKEN_KV.put("tdx", JSON.stringify({ t: token, exp: tokenExp }), { expirationTtl: Math.max(60, j.expires_in - 600) });
