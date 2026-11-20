@@ -1,6 +1,7 @@
 // 台灣大眾運輸通 — Cloudflare Worker（保管金鑰、代查 TDX）
 // 需要設定三個 Secret：TDX_ID、TDX_SECRET、GOOGLE_KEY
 // 以及一個 KV 綁定：TOKEN_KV（存 TDX 登入憑證）
+// 另外一個 Secret：ADMIN_KEY（給 GitHub Actions 送憑證用）
 
 const ALLOW = ["https://liyuan02-maker.github.io", "http://localhost:8765"];
 const TDX = "https://tdx.transportdata.tw/api/";
@@ -15,7 +16,7 @@ function ttlFor(path) {
 function cors(origin) {
   return {
     "Access-Control-Allow-Origin": ALLOW.includes(origin) ? origin : ALLOW[0],
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Vary": "Origin",
   };
 }
@@ -40,6 +41,7 @@ async function getToken(env, force) {
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({ grant_type: "client_credentials", client_id: env.TDX_ID, client_secret: env.TDX_SECRET }),
       });
+      if (env.TOKEN_KV) await env.TOKEN_KV.put("last", JSON.stringify({ at: new Date().toISOString(), status: r.status }));
       if (r.status === 429) { await sleep(2000 * (attempt + 1)); continue; }
       if (!r.ok) throw new Error(`TDX 登入失敗 (${r.status})，請檢查 TDX 金鑰`);
       const j = await r.json();
@@ -77,8 +79,21 @@ export default {
     const origin = req.headers.get("Origin") || "";
     if (req.method === "OPTIONS") return new Response(null, { headers: cors(origin) });
 
-    if (url.pathname === "/" || url.pathname === "/ping") return json({ ok: true, tdx: !!env.TDX_ID, google: !!env.GOOGLE_KEY, kv: !!env.TOKEN_KV,
-      token: env.TOKEN_KV ? (await env.TOKEN_KV.get("tdx", "json")) ? "ready" : "waiting" : "no KV" }, 200, origin);
+    if (url.pathname === "/" || url.pathname === "/ping") return json({ ok: true, tdx: !!env.TDX_ID, google: !!env.GOOGLE_KEY, kv: !!env.TOKEN_KV, admin: !!env.ADMIN_KEY,
+      token: env.TOKEN_KV ? (await env.TOKEN_KV.get("tdx", "json")) ? "ready" : "waiting" : "no KV",
+      last: env.TOKEN_KV ? await env.TOKEN_KV.get("last", "json") : null }, 200, origin);
+
+    // GitHub Actions 每 6 小時取得 TDX 憑證後送到這裡（需要 ADMIN_KEY）
+    if (url.pathname === "/set-token" && req.method === "POST") {
+      if (!env.ADMIN_KEY || req.headers.get("x-admin-key") !== env.ADMIN_KEY) return json({ error: "forbidden" }, 403, origin);
+      const j = await req.json().catch(() => ({}));
+      if (!j.access_token || !j.expires_in) return json({ error: "bad token" }, 400, origin);
+      token = j.access_token;
+      tokenExp = Date.now() + (j.expires_in - 600) * 1000;
+      await env.TOKEN_KV.put("tdx", JSON.stringify({ t: token, exp: tokenExp }), { expirationTtl: Math.max(60, j.expires_in - 600) });
+      await env.TOKEN_KV.put("last", JSON.stringify({ at: new Date().toISOString(), status: "set by GitHub" }));
+      return json({ ok: true }, 200, origin);
+    }
 
     // 只給自己的網站用
     if (origin && !ALLOW.includes(origin)) return json({ error: "not allowed" }, 403, origin);
