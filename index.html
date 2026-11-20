@@ -39,6 +39,7 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 #goBtn{background:var(--ink);color:#fff;padding:0 16px}
 .fab{position:fixed;right:12px;z-index:5;width:46px;height:46px;border-radius:50%;border:0;background:#fff;box-shadow:0 3px 12px rgba(0,0,0,.2);font-size:20px;cursor:pointer}
 #locBtn{bottom:calc(var(--sheet-h) + 12px)}
+#langBtn{bottom:calc(var(--sheet-h) + 66px);font:700 14px/1 system-ui,sans-serif;color:var(--ink)}
 #areaBtn{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 74px);z-index:5;border:0;border-radius:999px;background:var(--ink);color:#fff;font:inherit;font-size:14px;font-weight:700;padding:9px 16px;box-shadow:0 3px 12px rgba(0,0,0,.25);cursor:pointer;display:none}
 
 /* 下方抽屜 */
@@ -117,6 +118,7 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 <div class="hint" id="hint"></div>
 <button id="areaBtn">🔄 查這一區</button>
 <button class="fab" id="locBtn" title="回到我的位置">◎</button>
+<button class="fab" id="langBtn" title="中文 / English">EN</button>
 
 <div class="sheet" id="sheet">
   <div class="grab" id="grab"><span></span></div>
@@ -138,6 +140,11 @@ const LS = {
 // 金鑰放在 Cloudflare Worker，朋友不用填
 const WORKER = "https://tw-transit-api.liyuan02.workers.dev";
 let KEYS = {};
+// ====== 語言（中文／English）======
+const LANG = LS.get("lang") || ((navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en");
+const EN = LANG === "en";
+const L = (zh, en) => EN ? en : zh;
+const nm = (o, zhKey = "Zh_tw", enKey = "En") => (o ? (EN ? (o[enKey] || o[zhKey]) : o[zhKey]) : "") || "";
 // 清掉過期的快取
 try { for (const k of Object.keys(localStorage)) if (k.startsWith("tt_c_")) { const v = JSON.parse(localStorage.getItem(k)); if (!v || v.exp < Date.now()) localStorage.removeItem(k); } } catch (e) {}
 async function lsCached(key, ttlSec, fn){
@@ -194,16 +201,16 @@ function tdxSlot() {
 }
 
 async function tdx(pathAndQuery) {
-  if (Date.now() < tdxCooldown) throw new Error(`TDX 暫時限流，約 ${Math.ceil((tdxCooldown - Date.now()) / 1000)} 秒後自動恢復`);
+  if (Date.now() < tdxCooldown) throw new Error(L(`TDX 暫時限流，約 ${Math.ceil((tdxCooldown - Date.now()) / 1000)} 秒後自動恢復`, `TDX is rate-limited — retrying in about ${Math.ceil((tdxCooldown - Date.now()) / 1000)}s`));
   const url = WORKER + "/tdx" + pathAndQuery;
   for (let attempt = 0; attempt < 4; attempt++) {
     await tdxSlot();
     let res;
-    try { res = await fetch(url); } catch (e) { throw new Error("連不到資料伺服器，請確認網路"); }
+    try { res = await fetch(url); } catch (e) { throw new Error(L("連不到資料伺服器，請確認網路", "Can't reach the data server — check your connection")); }
     if (res.status === 429) {           // 太頻繁：等一下再試
       if (attempt < 3) { await sleep(2000 * 2 ** attempt); continue; }   // 等 2、4、8 秒
       tdxCooldown = Date.now() + 60000;
-      throw new Error("TDX 暫時限流，約 60 秒後自動恢復");
+      throw new Error(L("TDX 暫時限流，約 60 秒後自動恢復", "TDX is rate-limited — retrying in about 60s"));
     }
     if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || `TDX 錯誤 ${res.status}`); }
     return res.json();
@@ -227,7 +234,7 @@ async function bikeNearby(lat, lon) {
       const d = distM(lat, lon, sLat, sLon);
       return {
         id: s.StationUID,
-        name: (s.StationName?.Zh_tw || "").replace(/^YouBike2\.0_|^YouBike1\.0_/, ""),
+        name: nm(s.StationName).replace(/^YouBike\s?2\.0_|^YouBike\s?1\.0_/i, ""),
         lat: sLat, lon: sLon,
         bikes: a.AvailableRentBikes ?? null,
         docks: a.AvailableReturnBikes ?? null,
@@ -256,7 +263,7 @@ async function busNearby(lat, lon) {
     // 以站名分組，取最近的 3 個站牌
     const groups = new Map();
     for (const s of stops) {
-      const name = s.StopName?.Zh_tw || "";
+      const name = nm(s.StopName);
       const d = distM(lat, lon, s.StopPosition.PositionLat, s.StopPosition.PositionLon);
       const g = groups.get(name) || { name, dist: Infinity, uids: [], lat: 0, lon: 0 };
       g.uids.push(s.StopUID);
@@ -284,18 +291,19 @@ async function busNearby(lat, lon) {
     }));
 
     const routes = await routeEnds(etas);
-    const STATUS = { 1: "尚未發車", 2: "交管不停靠", 3: "末班車已過", 4: "今日未營運" };
+    const STATUS = EN ? { 1: "Not departed", 2: "Not stopping", 3: "Last bus gone", 4: "No service today" } : { 1: "尚未發車", 2: "交管不停靠", 3: "末班車已過", 4: "今日未營運" };
     return nearest.map(g => {
       const rows = etas.filter(e => g.uids.includes(e.StopUID)).map(e => {
         const r = routes[e.RouteUID];
         // 依行駛方向排出「起點 → 終點」
-        const ends = r && r.a && r.b ? (e.Direction === 1 ? [r.b, r.a] : [r.a, r.b]) : null;
+        const ra = r ? (EN ? r.ae || r.a : r.a) : "", rb = r ? (EN ? r.be || r.b : r.b) : "";
+        const ends = ra && rb ? (e.Direction === 1 ? [rb, ra] : [ra, rb]) : null;
         return {
-        route: e.RouteName?.Zh_tw || "",
+        route: nm(e.RouteName),
         ends,
         dir: e.Direction,
         min: e.EstimateTime != null ? Math.round(e.EstimateTime / 60) : null,
-        status: e.EstimateTime != null ? null : (STATUS[e.StopStatus] || "無資料"),
+        status: e.EstimateTime != null ? null : (STATUS[e.StopStatus] || L("無資料", "No data")),
       }; });
       // 同一路線同方向只留一筆
       const uniq = new Map();
@@ -318,7 +326,7 @@ async function routeEnds(etas){
   const out = {}, need = new Map();
   for (const e of etas){
     if (!e.RouteUID || out[e.RouteUID]) continue;
-    const c = LS.get("c_rt:" + e.RouteUID);
+    const c = LS.get("c_rt2:" + e.RouteUID);
     if (c && c.exp > Date.now()) { out[e.RouteUID] = c.val; continue; }
     const pre = e.RouteUID.slice(0, 3);
     const city = pre === "THB" ? "InterCity" : CITY[pre];
@@ -329,15 +337,15 @@ async function routeEnds(etas){
   await Promise.all([...need].map(async ([city, set]) => {
     const uids = [...set].slice(0, 30);
     const filter = encodeURIComponent(uids.map(u => `RouteUID eq '${u}'`).join(" or "));
-    const sel = "$select=RouteUID,DepartureStopNameZh,DestinationStopNameZh";
+    const sel = "$select=RouteUID,DepartureStopNameZh,DestinationStopNameZh,DepartureStopNameEn,DestinationStopNameEn";
     const p = city === "InterCity" ? `/basic/v2/Bus/Route/InterCity?$filter=${filter}&${sel}` : `/basic/v2/Bus/Route/City/${city}?$filter=${filter}&${sel}`;
     try {
       for (const r of await tdx(p)) {
-        const val = { a: r.DepartureStopNameZh || "", b: r.DestinationStopNameZh || "" };
+        const val = { a: r.DepartureStopNameZh || "", b: r.DestinationStopNameZh || "", ae: r.DepartureStopNameEn || "", be: r.DestinationStopNameEn || "" };
         out[r.RouteUID] = val;
-        LS.set("c_rt:" + r.RouteUID, { val, exp: Date.now() + 7 * 86400000 });
+        LS.set("c_rt2:" + r.RouteUID, { val, exp: Date.now() + 7 * 86400000 });
       }
-      for (const u of uids) if (!out[u]) LS.set("c_rt:" + u, { val: {}, exp: Date.now() + 86400000 }); // 查不到的也記一天
+      for (const u of uids) if (!out[u]) LS.set("c_rt2:" + u, { val: {}, exp: Date.now() + 86400000 }); // 查不到的也記一天
     } catch (e) { console.warn(e.message); }
   }));
   return out;
@@ -345,21 +353,21 @@ async function routeEnds(etas){
 
 // ---------- 台鐵 / 高鐵：最近車站 + 接下來三班 ----------
 async function traStations() {
-  return lsCached("traSt", 86400, async () => {
+  return lsCached("traSt2", 86400, async () => {
     let j;
     try { j = await tdx("/basic/v3/Rail/TRA/Station"); }
     catch (e) { j = await tdx("/basic/v2/Rail/TRA/Station"); } // v3 失敗改用 v2
     return (j.Stations || j).map(s => ({
-      id: s.StationID, name: s.StationName.Zh_tw,
+      id: s.StationID, name: s.StationName.Zh_tw, nameEn: s.StationName.En || "",
       lat: s.StationPosition.PositionLat, lon: s.StationPosition.PositionLon,
     }));
   });
 }
 async function thsrStations() {
-  return lsCached("thsrSt", 86400, async () => {
+  return lsCached("thsrSt2", 86400, async () => {
     const j = await tdx("/basic/v2/Rail/THSR/Station");
     return j.map(s => ({
-      id: s.StationID, name: s.StationName.Zh_tw,
+      id: s.StationID, name: s.StationName.Zh_tw, nameEn: s.StationName.En || "",
       lat: s.StationPosition.PositionLat, lon: s.StationPosition.PositionLon,
     }));
   });
@@ -393,7 +401,7 @@ async function railNext3(kind, o, d) {
       const a = st.find(x => x.StationID === o.id), b = st.find(x => x.StationID === d.id);
       return a && b ? {
         no: t.TrainInfo.TrainNo,
-        type: (t.TrainInfo.TrainTypeName?.Zh_tw || "").replace(/\(.*\)/, ""),
+        type: nm(t.TrainInfo.TrainTypeName).replace(/\(.*\)/, "").trim(),
         dep: a.DepartureTime.slice(0, 5), arr: b.ArrivalTime.slice(0, 5),
       } : null;
     }).filter(x => x && hmToMin(x.dep) >= after)
@@ -402,7 +410,7 @@ async function railNext3(kind, o, d) {
     const j = await cached(`thsrOD:${o.id}:${d.id}:${date}`, 600,
       () => tdx(`/basic/v2/Rail/THSR/DailyTimetable/OD/${o.id}/to/${d.id}/${date}`));
     return j.map(t => ({
-      no: t.DailyTrainInfo.TrainNo, type: "高鐵",
+      no: t.DailyTrainInfo.TrainNo, type: L("高鐵", "THSR"),
       dep: t.OriginStopTime.DepartureTime.slice(0, 5),
       arr: t.DestinationStopTime.ArrivalTime.slice(0, 5),
     })).filter(x => hmToMin(x.dep) >= after)
@@ -415,18 +423,18 @@ async function railPlan(kind, from, to) {
   const o = nearestStation(list, from.lat, from.lon);
   const d = nearestStation(list, to.lat, to.lon);
   const limit = kind === "tra" ? 8000 : 25000; // 離車站太遠就不建議
-  if (!o || !d) return { note: "找不到車站資料" };
-  if (o.id === d.id) return { note: "起訖最近的是同一站，不需要搭乘" };
-  if (o.dist > limit || d.dist > limit) return { note: `起點或目的地離${kind === "tra" ? "台鐵" : "高鐵"}站太遠`, from: o, to: d };
+  if (!o || !d) return { note: L("找不到車站資料", "No station data") };
+  if (o.id === d.id) return { note: L("起訖最近的是同一站，不需要搭乘", "Same nearest station at both ends — no train needed") };
+  if (o.dist > limit || d.dist > limit) return { note: L(`起點或目的地離${kind === "tra" ? "台鐵" : "高鐵"}站太遠`, `Start or destination is too far from a ${kind === "tra" ? "TRA" : "THSR"} station`), from: o, to: d };
   return { from: o, to: d, trains: await railNext3(kind, o, d) };
 }
 
 // ---------- Google：地址轉座標、Routes API 大眾運輸 ----------
 // 備援：用 OpenStreetMap 查地址座標
 async function geocodeOSM(address) {
-  const u = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=tw&accept-language=zh-TW&q=" + encodeURIComponent(address);
+  const u = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=tw&accept-language=${EN ? "en" : "zh-TW"}&q=` + encodeURIComponent(address);
   const j = await (await fetch(u)).json();
-  if (!j.length) throw new Error(`找不到「${address}」，換個說法試試`);
+  if (!j.length) throw new Error(L(`找不到「${address}」，換個說法試試`, `Couldn't find "${address}" — try another name`));
   return { lat: +j[0].lat, lon: +j[0].lon, name: address };
 }
 
@@ -438,7 +446,7 @@ const FIELD_MASK = [
 
 async function computeTransit(from, to, modes, departureTime) {
   const GOOGLE_SERVER_KEY = KEYS.google;
-  if (!GOOGLE_SERVER_KEY) throw new Error("沒有 Google 金鑰（資料伺服器沒有回應）");
+  if (!GOOGLE_SERVER_KEY) throw new Error(L("沒有 Google 金鑰（資料伺服器沒有回應）", "No Google key (data server not responding)"));
   const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
     method: "POST",
     headers: {
@@ -452,7 +460,7 @@ async function computeTransit(from, to, modes, departureTime) {
       travelMode: "TRANSIT",
       computeAlternativeRoutes: true,
       departureTime: departureTime.toISOString(),
-      languageCode: "zh-TW", regionCode: "TW",
+      languageCode: EN ? "en" : "zh-TW", regionCode: "TW",
       transitPreferences: { allowedTravelModes: modes },
     }),
   });
@@ -573,7 +581,7 @@ function hmDiff(hmStr){ // "08:15" 距離現在幾分鐘（台北時間）
   const [h,m] = hmStr.split(":").map(Number);
   return h*60+m - (now.getHours()*60+now.getMinutes());
 }
-const rel = m => m <= 0 ? "即將" : m < 60 ? `${m} 分後` : `${Math.floor(m/60)} 小時 ${m%60} 分後`;
+const rel = m => EN ? (m <= 0 ? "now" : m < 60 ? `in ${m} min` : `in ${Math.floor(m/60)}h ${m%60}m`) : (m <= 0 ? "即將" : m < 60 ? `${m} 分後` : `${Math.floor(m/60)} 小時 ${m%60} 分後`);
 
 async function api(path){
   const u = new URL(path, location.href), q = u.searchParams;
@@ -585,10 +593,10 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "w4";
+const VERSION = "w5";
 function showMapErr(msg){
   const box = $("mapErr");
-  box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>地圖載入有問題</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
+  box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>${L("地圖載入有問題", "Map problem")}</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
   box.style.display = "block";
 }
 
@@ -612,10 +620,10 @@ const MAP = {
     let ok = false, failed = false;
     const fail = why => {
       if (ok || failed) return; failed = true;
-      notice(`Google 地圖無法使用（${why}），先改用 OpenStreetMap。`);
+      notice(L(`Google 地圖無法使用（${why}），先改用 OpenStreetMap。`, `Google Maps unavailable (${why}) — using OpenStreetMap instead.`));
       this.useLeaflet();
     };
-    window.gm_authFailure = () => fail(this.gmCode ? GM_REASON[this.gmCode] || this.gmCode : "金鑰被拒絕");
+    window.gm_authFailure = () => fail(this.gmCode ? GM_REASON[this.gmCode] || this.gmCode : L("金鑰被拒絕", "key rejected"));
     const ce = console.error.bind(console);
     console.error = (...a) => { const m = a.map(String).join(" ").match(/(\w+MapError)/); if (m) this.gmCode = m[1]; ce(...a); };
     window.__gmReady = () => {
@@ -629,17 +637,17 @@ const MAP = {
         this.defineOverlay();
         this.redraw();
         if (!this.done){ this.done = true; locate(); }
-      } catch (e) { fail("啟動失敗"); }
+      } catch (e) { fail(L("啟動失敗", "failed to start")); }
     };
     const sc = document.createElement("script");
-    sc.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(KEYS.google)}&v=weekly&language=zh-TW&region=TW&callback=__gmReady`;
-    sc.async = true; sc.onerror = () => fail("下載不到 Google 地圖");
+    sc.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(KEYS.google)}&v=weekly&language=${EN ? "en" : "zh-TW"}&region=TW&callback=__gmReady`;
+    sc.async = true; sc.onerror = () => fail(L("下載不到 Google 地圖", "couldn't load Google Maps"));
     document.head.appendChild(sc);
-    setTimeout(() => { if (!ok) fail(this.gmCode ? GM_REASON[this.gmCode] || this.gmCode : "等太久沒有回應"); }, 10000);
+    setTimeout(() => { if (!ok) fail(this.gmCode ? GM_REASON[this.gmCode] || this.gmCode : L("等太久沒有回應", "timed out")); }, 10000);
   },
 
   useLeaflet(){
-    if (!window.L){ notice("下載不到地圖程式，請確認網路後重新整理。"); return; }
+    if (!window.L){ notice(L("下載不到地圖程式，請確認網路後重新整理。", "Couldn't load the map — check your connection and reload.")); return; }
     this.kind = "leaflet"; this.g = null;
     const el = this.freshDiv();
     this.l = L.map(el, {zoomControl: false}).setView([25.0478, 121.5170], 16);
@@ -738,7 +746,7 @@ const ICON = {
   me: () => `<div class="me"><svg width="20" height="22" viewBox="0 0 20 22" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="11.5" cy="3.2" r="2.2" fill="#fff" stroke="none"/><path d="M10.5 7.5 L8.6 13.2 L11.6 16 L12.6 20.5"/><path d="M8.6 13.2 L6.4 20.5"/><path d="M10.3 8.2 L6.8 10.2 L5.6 13"/><path d="M10.6 8 L13 11 L15.8 12"/></svg></div>`,
   bus: () => `<div class="busdot"></div>`,
   dest: () => `<svg width="30" height="40" viewBox="0 0 30 40" style="display:block"><path d="M15 1C7 1 1 7 1 15c0 10 14 24 14 24s14-14 14-24C29 7 23 1 15 1z" fill="#dc2626" stroke="#fff" stroke-width="2"/><circle cx="15" cy="15" r="5" fill="#fff"/></svg>`,
-  bike: (b, color) => `<div class="bk" style="--c:${color}"><span class="ic">🚲</span>${b.bikes ?? "?"}<span class="sp">/ 空${b.docks ?? "?"}</span></div>`,
+  bike: (b, color) => `<div class="bk" style="--c:${color}"><span class="ic">🚲</span>${b.bikes ?? "?"}<span class="sp">/ ${L("空", "")}${b.docks ?? "?"}</span></div>`,
 };
 // Google 路線線條解碼
 function decodePolyline(str){
@@ -758,23 +766,23 @@ const pad = f => ({paddingTopLeft: [30, 90], paddingBottomRight: [30, window.inn
 function el(html){ const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; }
 
 function locate(){
-  if (!navigator.geolocation){ useFallback("此瀏覽器不支援定位"); return; }
+  if (!navigator.geolocation){ useFallback(L("此瀏覽器不支援定位", "This browser doesn't support location")); return; }
   navigator.geolocation.getCurrentPosition(p => {
     S.me = {lat: p.coords.latitude, lon: p.coords.longitude};
     S.located = true;
     placeMe();
     MAP.panTo(S.me.lat, S.me.lon, 16);
     loadNear(S.me);
-  }, e => useFallback(e.code === 1 ? "你沒有允許定位" : "無法取得定位"), {enableHighAccuracy: true, timeout: 10000, maximumAge: 30000});
+  }, e => useFallback(e.code === 1 ? L("你沒有允許定位", "Location permission denied") : L("無法取得定位", "Couldn't get your location")), {enableHighAccuracy: true, timeout: 10000, maximumAge: 30000});
 }
 function useFallback(msg){
-  S.me = {lat: 25.0478, lon: 121.5170}; S.located = false; S.locMsg = msg + "，先以台北車站為起點。";
+  S.me = {lat: 25.0478, lon: 121.5170}; S.located = false; S.locMsg = msg + L("，先以台北車站為起點。", " — using Taipei Main Station as the start.");
   placeMe(); MAP.panTo(S.me.lat, S.me.lon);
   loadNear(S.me);
 }
 function placeMe(){
   rm(meMarker);
-  meMarker = mk({lat: S.me.lat, lng: S.me.lon}, ICON.me(), "我的位置", 999);
+  meMarker = mk({lat: S.me.lat, lng: S.me.lon}, ICON.me(), L("我的位置", "My location"), 999);
 }
 
 // ====== 附近：YouBike + 公車 ======
@@ -854,11 +862,11 @@ const LINE_ZH = {
 };
 function zhLine(n){
   const k = String(n || "").toLowerCase().replace(/[\u2010-\u2015]/g, "-").replace(/\s*-\s*/g, "-").replace(/\s+line$/, "").trim();
-  return LINE_ZH[k] || LINE_ZH[k + " line"] || n;
+  return EN ? n : (LINE_ZH[k] || LINE_ZH[k + " line"] || n);
 }
 function stepsHtml(parts){
   return `<div class="steps">${parts.map(p => p.kind === "walk"
-    ? (p.sec >= 60 ? `<span class="w">🚶${Math.round(p.sec/60)}分</span>` : "")
+    ? (p.sec >= 60 ? `<span class="w">🚶${Math.round(p.sec/60)}${L("分", " min")}</span>` : "")
     : (() => { const [ic, c] = VEH[p.vehicle] || ["🚍","#555"];
         return `<span class="pill" style="background:${p.color || c};color:${p.textColor || "#fff"}">${ic} ${esc(zhLine(p.line))}</span>`; })()
   ).filter(Boolean).join(`<span class="w">›</span>`)}</div>`;
@@ -870,15 +878,15 @@ function routeCard(kind, r, i){
   const key = `${kind}:${i}`;
   return `<div class="card tap ${S.selected === key ? "sel" : ""}" data-route="${key}">
     <div class="row">
-      <div><div class="num">${hm(r.firstDep)}</div><div class="mute">${rel(m)}開</div></div>
+      <div><div class="num">${hm(r.firstDep)}</div><div class="mute">${L(rel(m) + "開", "departs " + rel(m))}</div></div>
       <div style="flex:1">
-        <div><b>${esc(zhLine(first.line))}</b> <span class="mute">往 ${esc(first.headsign || first.to)}</span></div>
-        <div class="mute">走 ${r.walkToStop} 分鐘到「${esc(first.from)}」</div>
+        <div><b>${esc(zhLine(first.line))}</b> <span class="mute">${L("往", "to")} ${esc(first.headsign || first.to)}</span></div>
+        <div class="mute">${L(`走 ${r.walkToStop} 分鐘到「${esc(first.from)}」`, `Walk ${r.walkToStop} min to ${esc(first.from)}`)}</div>
       </div>
-      <div style="text-align:right"><div><b>${hm(r.arrive)}</b></div><div class="mute">到達</div></div>
+      <div style="text-align:right"><div><b>${hm(r.arrive)}</b></div><div class="mute">${L("到達", "arrive")}</div></div>
     </div>
     ${stepsHtml(r.parts)}
-    ${m < r.walkToStop ? `<div class="err" style="margin-top:6px">⚠️ 走過去可能趕不上</div>` : ""}
+    ${m < r.walkToStop ? `<div class="err" style="margin-top:6px">⚠️ ${L("走過去可能趕不上", "You may not make it in time")}</div>` : ""}
   </div>`;
 }
 
@@ -889,17 +897,19 @@ function railSec(kind, title, color, res){
   else if (res.v.note) inner = `<div class="empty">${esc(res.v.note)}</div>`;
   else {
     const {from, to, trains} = res.v;
+    const fn = EN ? from.nameEn || from.name : from.name, tn = EN ? to.nameEn || to.name : to.name;
     inner = `<div class="card">
-      <div><b>${esc(from.name)}</b> → <b>${esc(to.name)}</b></div>
-      <div class="mute">最近車站距你 ${(from.dist/1000).toFixed(1)} 公里（步行約 ${Math.round(from.dist/75)} 分）；目的地距 ${esc(to.name)} ${(to.dist/1000).toFixed(1)} 公里</div>
+      <div><b>${esc(fn)}</b> → <b>${esc(tn)}</b></div>
+      <div class="mute">${L(`最近車站距你 ${(from.dist/1000).toFixed(1)} 公里（步行約 ${Math.round(from.dist/75)} 分）；目的地距 ${esc(tn)} ${(to.dist/1000).toFixed(1)} 公里`,
+        `Nearest station is ${(from.dist/1000).toFixed(1)} km away (~${Math.round(from.dist/75)} min walk); destination is ${(to.dist/1000).toFixed(1)} km from ${esc(tn)}`)}</div>
       ${trains.length ? `<table class="trains">${trains.map(t => `<tr>
         <td><b>${esc(t.dep)}</b> → ${esc(t.arr)}</td>
-        <td class="mute">${esc(t.type)} ${esc(t.no)}次</td>
+        <td class="mute">${esc(t.type)} ${L(esc(t.no) + "次", "No. " + esc(t.no))}</td>
         <td class="mute">${rel(hmDiff(t.dep))}</td></tr>`).join("")}</table>`
-        : `<div class="empty">今天已經沒有班次了</div>`}
+        : `<div class="empty">${L("今天已經沒有班次了", "No more trains today")}</div>`}
     </div>`;
   }
-  return `<div class="sec"><h3><i style="background:${color}"></i>${title}<small>接下來 3 班</small></h3>${inner}</div>`;
+  return `<div class="sec"><h3><i style="background:${color}"></i>${title}<small>${L("接下來 3 班", "Next 3")}</small></h3>${inner}</div>`;
 }
 
 function render(){
@@ -907,48 +917,48 @@ function render(){
   let h = "";
   if (S.tab === "near"){
     if (S.locMsg && !S.located) h += `<div class="notice">📍 ${esc(S.locMsg)}</div>`;
-    if (S.nearLoading) h += `<div class="empty"><span class="spin"></span> 讀取附近資料…</div>`;
+    if (S.nearLoading) h += `<div class="empty"><span class="spin"></span> ${L("讀取附近資料…", "Loading nearby…")}</div>`;
     if (S.nearErr) h += `<div class="err">${esc(S.nearErr)}</div>`;
     // 公車
-    h += `<div class="sec"><h3><i style="background:var(--bus)"></i>附近 ${NEAR_M} 公尺的公車站牌<small>每 60 秒更新</small></h3>`;
+    h += `<div class="sec"><h3><i style="background:var(--bus)"></i>${L(`附近 ${NEAR_M} 公尺的公車站牌`, `Bus stops within ${NEAR_M} m`)}<small>${L("每 60 秒更新", "Updates every 60s")}</small></h3>`;
     h += S.buses.length ? S.buses.map(s => `<div class="card">
-        <div class="row"><b style="flex:1">${esc(s.name)}</b><span class="mute">🚶 ${s.walk} 分（${s.dist} m）</span></div>
+        <div class="row"><b style="flex:1">${esc(s.name)}</b><span class="mute">🚶 ${s.walk} ${L("分", "min")}（${s.dist} m）</span></div>
         ${s.arrivals.length ? `<div class="eta">${s.arrivals.slice(0, 8).map(a => `
-          <span><b class="rno">${esc(a.route)}</b>${a.ends ? `<span class="rends">${esc(a.ends[0])} → ${esc(a.ends[1])}</span>` : (s.arrivals.filter(x => x.route === a.route).length > 1 ? `<span class="mute">（${a.dir === 1 ? "返程" : "去程"}）</span>` : "")}</span>
-          <b class="${a.min != null && a.min <= 3 ? "soon" : ""}">${a.min != null ? (a.min <= 1 ? "進站中" : a.min + " 分") : `<span class="mute">${esc(a.status)}</span>`}</b>`).join("")}</div>`
-          : `<div class="empty">目前沒有到站資料</div>`}
-      </div>`).join("") : (S.nearLoading ? "" : `<div class="empty">附近 ${NEAR_M} 公尺內沒有公車站</div>`);
+          <span><b class="rno">${esc(a.route)}</b>${a.ends ? `<span class="rends">${esc(a.ends[0])} → ${esc(a.ends[1])}</span>` : (s.arrivals.filter(x => x.route === a.route).length > 1 ? `<span class="mute">（${a.dir === 1 ? L("返程", "return") : L("去程", "outbound")}）</span>` : "")}</span>
+          <b class="${a.min != null && a.min <= 3 ? "soon" : ""}">${a.min != null ? (a.min <= 1 ? L("進站中", "Arriving") : a.min + L(" 分", " min")) : `<span class="mute">${esc(a.status)}</span>`}</b>`).join("")}</div>`
+          : `<div class="empty">${L("目前沒有到站資料", "No arrival info right now")}</div>`}
+      </div>`).join("") : (S.nearLoading ? "" : `<div class="empty">${L(`附近 ${NEAR_M} 公尺內沒有公車站`, `No bus stops within ${NEAR_M} m`)}</div>`);
     h += `</div>`;
     // YouBike
-    h += `<div class="sec"><h3><i style="background:var(--bike)"></i>附近 ${NEAR_M} 公尺的 YouBike<small>可借 / 可還</small></h3>`;
+    h += `<div class="sec"><h3><i style="background:var(--bike)"></i>${L(`附近 ${NEAR_M} 公尺的 YouBike`, `YouBike within ${NEAR_M} m`)}<small>${L("可借 / 可還", "Bikes / Docks")}</small></h3>`;
     h += S.bikes.length ? S.bikes.map(b => `<div class="card ${S.focusBike === b.id ? "sel" : ""}" data-bike="${esc(b.id)}">
         <div class="row">
-          <div style="flex:1"><b>${esc(b.name)}</b><div class="mute">🚶 ${b.walk} 分（${b.dist} m）${b.service !== 1 ? " · 暫停營運" : ""}</div></div>
-          <div style="text-align:center"><div class="num" style="color:${bikeColor(b)}">${b.bikes ?? "?"}</div><div class="mute">可借</div></div>
-          <div style="text-align:center"><div class="num">${b.docks ?? "?"}</div><div class="mute">空位</div></div>
-        </div></div>`).join("") : (S.nearLoading ? "" : `<div class="empty">附近 ${NEAR_M} 公尺內沒有 YouBike 站</div>`);
+          <div style="flex:1"><b>${esc(b.name)}</b><div class="mute">🚶 ${b.walk} ${L("分", "min")}（${b.dist} m）${b.service !== 1 ? L(" · 暫停營運", " · Out of service") : ""}</div></div>
+          <div style="text-align:center"><div class="num" style="color:${bikeColor(b)}">${b.bikes ?? "?"}</div><div class="mute">${L("可借", "Bikes")}</div></div>
+          <div style="text-align:center"><div class="num">${b.docks ?? "?"}</div><div class="mute">${L("空位", "Docks")}</div></div>
+        </div></div>`).join("") : (S.nearLoading ? "" : `<div class="empty">${L(`附近 ${NEAR_M} 公尺內沒有 YouBike 站`, `No YouBike stations within ${NEAR_M} m`)}</div>`);
     h += `</div>`;
   } else {
-    if (!S.destText && !S.planLoading) h += `<div class="empty">在上方輸入目的地，就會列出公車、捷運、台鐵、高鐵接下來的班次。</div>`;
-    if (S.planLoading) h += `<div class="empty"><span class="spin"></span> 正在查「${esc(S.destText)}」的路線…</div>`;
+    if (!S.destText && !S.planLoading) h += `<div class="empty">${L("在上方輸入目的地，就會列出公車、捷運、台鐵、高鐵接下來的班次。", "Enter a destination above to see the next bus, metro, TRA and THSR departures.")}</div>`;
+    if (S.planLoading) h += `<div class="empty"><span class="spin"></span> ${L(`正在查「${esc(S.destText)}」的路線…`, `Finding routes to "${esc(S.destText)}"…`)}</div>`;
     if (S.planErr) h += `<div class="err">${esc(S.planErr)}</div>`;
     const p = S.plan;
     if (p){
-      h += `<div class="mute" style="margin-bottom:10px">目的地：${esc(p.to.name)}${S.located ? "" : "（起點：台北車站）"}</div>`;
+      h += `<div class="mute" style="margin-bottom:10px">${L("目的地：", "Destination: ")}${esc(p.to.name)}${S.located ? "" : L("（起點：台北車站）", " (from Taipei Main Station)")}</div>`;
       const list = (kind, title, color) => {
         const r = p[kind];
         let inner = !r.ok ? `<div class="err">${esc(r.e)}</div>`
           : r.v.length ? r.v.map((x, i) => routeCard(kind, x, i)).join("")
-          : `<div class="empty">找不到合適的班次</div>`;
-        return `<div class="sec"><h3><i style="background:${color}"></i>${title}<small>接下來 3 班・點選看路線</small></h3>${inner}</div>`;
+          : `<div class="empty">${L("找不到合適的班次", "No suitable departures")}</div>`;
+        return `<div class="sec"><h3><i style="background:${color}"></i>${title}<small>${L("接下來 3 班・點選看路線", "Next 3 · tap for route")}</small></h3>${inner}</div>`;
       };
-      h += list("bus", "公車", "var(--bus)");
-      h += list("metro", "捷運（台北・桃園機捷・台中・高雄）", "var(--mrt)");
-      h += railSec("tra", "台鐵", "var(--tra)", p.tra);
-      h += railSec("thsr", "高鐵", "var(--hsr)", p.thsr);
+      h += list("bus", L("公車", "Bus"), "var(--bus)");
+      h += list("metro", L("捷運（台北・桃園機捷・台中・高雄）", "Metro (Taipei · Taoyuan Airport · Taichung · Kaohsiung)"), "var(--mrt)");
+      h += railSec("tra", L("台鐵", "TRA (Railway)"), "var(--tra)", p.tra);
+      h += railSec("thsr", L("高鐵", "THSR (High Speed Rail)"), "var(--hsr)", p.thsr);
     }
   }
-  h += `<div class="mute" style="text-align:center;margin-top:8px;font-size:12px">版本 ${VERSION}</div>`;
+  h += `<div class="mute" style="text-align:center;margin-top:8px;font-size:12px">${L("版本", "Version")} ${VERSION}</div>`;
   $("body").innerHTML = h;
   document.querySelectorAll("[data-route]").forEach(c => c.onclick = () => showRoute(c.dataset.route));
   document.querySelectorAll("[data-bike]").forEach(c => c.onclick = () => {
@@ -964,6 +974,7 @@ function syncFab(){
   const h = s.classList.contains("small") ? "92px" : s.classList.contains("big") ? "86vh" : "42vh";
   document.documentElement.style.setProperty("--sheet-h", h);
   $("locBtn").style.display = s.classList.contains("big") ? "none" : "block";
+  $("langBtn").style.display = s.classList.contains("big") ? "none" : "block";
 }
 $("grab").onclick = () => {
   const s = $("sheet");
@@ -987,8 +998,11 @@ function localSugg(q){
   const out = [];
   for (const h of LS.get("hist") || []) if (!q || h.includes(q)) out.push({ic: "🕘", main: h, value: h, hist: true});
   if (q){
-    const add = (key, ic, suf) => { for (const st of (LS.get("c_" + key)?.val || [])) if (st.name.includes(q)) out.push({ic, main: st.name + suf, value: st.name + suf}); };
-    add("thsrSt", "🚄", "高鐵站"); add("traSt", "🚆", "車站");
+    const add = (key, ic, suf, sufEn) => { for (const st of (LS.get("c_" + key)?.val || [])) {
+      const n = EN ? st.nameEn || st.name : st.name;
+      if (n.toLowerCase().includes(q.toLowerCase())) out.push({ic, main: n + L(suf, sufEn), value: st.name + suf});
+    } };
+    add("thsrSt2", "🚄", "高鐵站", " HSR Station"); add("traSt2", "🚆", "車站", " Station");
   }
   return out;
 }
@@ -1001,7 +1015,7 @@ async function remoteSugg(q){
       const r = await fetch("https://places.googleapis.com/v1/places:autocomplete", {
         method: "POST",
         headers: {"content-type": "application/json", "X-Goog-Api-Key": KEYS.google},
-        body: JSON.stringify({input: q, languageCode: "zh-TW", regionCode: "tw", includedRegionCodes: ["tw"], sessionToken: sessTok,
+        body: JSON.stringify({input: q, languageCode: EN ? "en" : "zh-TW", regionCode: "tw", includedRegionCodes: ["tw"], sessionToken: sessTok,
           locationBias: {circle: {center: {latitude: me.lat, longitude: me.lon}, radius: 30000}}}),
       });
       if (r.status === 403 || r.status === 400) { placesOK = false; throw new Error("places off"); }
@@ -1059,32 +1073,33 @@ function hint(t, ms){ const h = $("hint"); h.textContent = t; h.style.display = 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const btn = $("micBtn");
   if (!SR){
-    btn.onclick = () => { $("dest").focus(); hint("這個瀏覽器不支援，請用鍵盤上的麥克風說話", 3500); };
+    btn.onclick = () => { $("dest").focus(); hint(L("這個瀏覽器不支援，請用鍵盤上的麥克風說話", "Not supported here — use the keyboard's mic instead"), 3500); };
     return;
   }
   let rec = null;
   btn.onclick = () => {
     if (rec){ rec.stop(); return; }
     rec = new SR();
-    rec.lang = "zh-TW"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+    rec.lang = EN ? "en-US" : "zh-TW"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
     let finalText = "";
-    rec.onstart = () => { btn.classList.add("on"); hint("請說出目的地…"); };
+    rec.onstart = () => { btn.classList.add("on"); hint(L("請說出目的地…", "Say your destination…")); };
     rec.onresult = e => {
       let txt = "";
       for (const r of e.results){ txt += r[0].transcript; if (r.isFinal) finalText = txt; }
       $("dest").value = txt.replace(/[。．.！!？?]$/, "");
     };
     rec.onerror = e => {
-      const msg = {"not-allowed": "請允許使用麥克風（設定 → Safari → 麥克風）", "service-not-allowed": "請允許使用麥克風", "no-speech": "沒有聽到聲音，再試一次", "network": "語音辨識需要網路"}[e.error] || "語音辨識失敗：" + e.error;
+      const msg = (EN ? {"not-allowed": "Please allow microphone access (Settings → Safari → Microphone)", "service-not-allowed": "Please allow microphone access", "no-speech": "Didn't hear anything — try again", "network": "Speech recognition needs internet"}
+        : {"not-allowed": "請允許使用麥克風（設定 → Safari → 麥克風）", "service-not-allowed": "請允許使用麥克風", "no-speech": "沒有聽到聲音，再試一次", "network": "語音辨識需要網路"})[e.error] || L("語音辨識失敗：", "Speech recognition failed: ") + e.error;
       hint(msg, 3500);
     };
     rec.onend = () => {
       btn.classList.remove("on"); rec = null;
       const v = $("dest").value.trim();
       if (finalText && v){ hint("", 0); doPlan(v); }
-      else if ($("hint").textContent === "請說出目的地…") hint("", 0);
+      else if ($("hint").textContent === L("請說出目的地…", "Say your destination…")) hint("", 0);
     };
-    try { rec.start(); } catch (e) { rec = null; hint("無法啟動麥克風", 3000); }
+    try { rec.start(); } catch (e) { rec = null; hint(L("無法啟動麥克風", "Couldn't start the microphone"), 3000); }
   };
 })();
 
@@ -1092,13 +1107,28 @@ $("locBtn").onclick = () => locate();
 $("areaBtn").onclick = () => { const c = MAP.center(); loadNear({lat: c.lat, lon: c.lng}); };
 
 render();
+// 套用介面文字
+(() => {
+  document.documentElement.lang = EN ? "en" : "zh-Hant";
+  document.title = L("台灣大眾運輸通", "Taiwan Transit");
+  $("dest").placeholder = L("要去哪裡？例如：台中車站、高雄巨蛋", "Where to? e.g. Taichung Station, Taipei 101");
+  $("micBtn").title = $("micBtn").ariaLabel = L("語音輸入", "Voice input");
+  $("goBtn").textContent = L("出發", "Go");
+  $("areaBtn").textContent = L("🔄 查這一區", "🔄 Search this area");
+  $("locBtn").title = L("回到我的位置", "My location");
+  document.querySelector('.tabs [data-t="near"]').textContent = L("附近", "Nearby");
+  document.querySelector('.tabs [data-t="route"]').textContent = L("路線", "Routes");
+  $("langBtn").textContent = EN ? "中" : "EN";
+  $("langBtn").onclick = () => { LS.set("lang", EN ? "zh" : "en"); location.reload(); };
+})();
+
 (async () => {
   try {
     const r = await fetch(WORKER + "/config");
     if (!r.ok) throw new Error(r.status);
     KEYS = await r.json();
   } catch (e) {
-    notice("連不到資料伺服器，地圖與查詢可能無法使用。");
+    notice(L("連不到資料伺服器，地圖與查詢可能無法使用。", "Can't reach the data server — map and search may not work."));
   }
   initMap();
 })();
