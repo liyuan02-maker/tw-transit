@@ -179,7 +179,7 @@ const hmToMin = s => { const [h, m] = s.split(":").map(Number); return h * 60 + 
 // ---------- TDX ----------
 // TDX 免費會員每秒呼叫次數有限：所有請求排隊，每次間隔 TDX_GAP 毫秒
 const TDX_GAP = 300;
-const NEAR_M = 200; // 附近範圍（公尺）
+const NEAR_M = 400; // 附近範圍（公尺）
 let tdxCooldown = 0; // 被擋之後暫停到這個時間
 let tdxQueue = Promise.resolve();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -212,7 +212,7 @@ async function bikeNearby(lat, lon) {
   const key = `bike:${lat.toFixed(3)},${lon.toFixed(3)}`;
   return cached(key, 55, async () => {
     const [stations, avail] = await Promise.all([
-      lsCached(`bikeSt2:${lat.toFixed(3)},${lon.toFixed(3)}`, 86400,
+      lsCached(`bikeSt3:${lat.toFixed(3)},${lon.toFixed(3)}`, 86400,
         () => tdx(`/advanced/v2/Bike/Station/NearBy?${near(lat, lon, NEAR_M + 150)}`)),
       tdx(`/advanced/v2/Bike/Availability/NearBy?${near(lat, lon, NEAR_M + 150)}`),
     ]);
@@ -246,7 +246,7 @@ const CITY = {
 async function busNearby(lat, lon) {
   const key = `bus:${lat.toFixed(3)},${lon.toFixed(3)}`;
   return cached(key, 55, async () => {
-    const stops = await lsCached(`busSt2:${lat.toFixed(3)},${lon.toFixed(3)}`, 86400,
+    const stops = await lsCached(`busSt3:${lat.toFixed(3)},${lon.toFixed(3)}`, 86400,
       () => tdx(`/advanced/v2/Bus/Stop/NearBy?${near(lat, lon, NEAR_M + 150)}&$top=80`));
 
     // 以站名分組，取最近的 3 個站牌
@@ -545,7 +545,7 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "w1";
+const VERSION = "w2";
 function showMapErr(msg){
   const box = $("mapErr");
   box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>地圖載入有問題</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
