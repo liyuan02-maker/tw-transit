@@ -64,6 +64,19 @@ async function refreshToken(env) {
   try { await getToken(env, true); return "refreshed"; } catch (e) { return e.message; }
 }
 
+// 檢查 GitHub 送來的密碼：比對 wrangler.toml 裡的指紋（ADMIN_KEY_SHA256），或 Cloudflare 的 ADMIN_KEY
+async function sha256(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function adminOK(env, key) {
+  key = key.trim();
+  if (!key) return false;
+  if (env.ADMIN_KEY && key === env.ADMIN_KEY.trim()) return true;
+  if (env.ADMIN_KEY_SHA256 && (await sha256(key)) === env.ADMIN_KEY_SHA256.trim().toLowerCase()) return true;
+  return false;
+}
+
 async function clearToken(env) {
   token = null; tokenExp = 0;
   if (env.TOKEN_KV) await env.TOKEN_KV.delete("tdx");
@@ -79,13 +92,13 @@ export default {
     const origin = req.headers.get("Origin") || "";
     if (req.method === "OPTIONS") return new Response(null, { headers: cors(origin) });
 
-    if (url.pathname === "/" || url.pathname === "/ping") return json({ ok: true, tdx: !!env.TDX_ID, google: !!env.GOOGLE_KEY, kv: !!env.TOKEN_KV, admin: !!env.ADMIN_KEY,
+    if (url.pathname === "/" || url.pathname === "/ping") return json({ ok: true, tdx: !!env.TDX_ID, google: !!env.GOOGLE_KEY, kv: !!env.TOKEN_KV, admin: !!(env.ADMIN_KEY || env.ADMIN_KEY_SHA256),
       token: env.TOKEN_KV ? (await env.TOKEN_KV.get("tdx", "json")) ? "ready" : "waiting" : "no KV",
       last: env.TOKEN_KV ? await env.TOKEN_KV.get("last", "json") : null }, 200, origin);
 
     // GitHub Actions 每 6 小時取得 TDX 憑證後送到這裡（需要 ADMIN_KEY）
     if (url.pathname === "/set-token" && req.method === "POST") {
-      if (!env.ADMIN_KEY || req.headers.get("x-admin-key") !== env.ADMIN_KEY) return json({ error: "forbidden" }, 403, origin);
+      if (!(await adminOK(env, req.headers.get("x-admin-key") || ""))) return json({ error: "forbidden" }, 403, origin);
       const j = await req.json().catch(() => ({}));
       if (!j.access_token || !j.expires_in) return json({ error: "bad token" }, 400, origin);
       token = j.access_token;

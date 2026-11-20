@@ -13,3 +13,7 @@ id = "a98c41774471438b9cbb5220f7c3a8d5"
 # 每 5 分鐘檢查一次 TDX 憑證
 [triggers]
 crons = ["*/5 * * * *"]
+
+# GitHub Actions 送 TDX 憑證時用的密碼指紋（不是密碼本身，公開沒關係）
+[vars]
+ADMIN_KEY_SHA256 = "2ffafad34e9693aa2be34e7dc0b9d04ad7e57a8338366182410c06f61b20dbb5"
