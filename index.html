@@ -66,6 +66,8 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 .steps{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:8px;font-size:13px}
 .steps .w{color:var(--mute)}
 .eta{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:14px;margin-top:8px}
+.eta .rno{font-weight:600;margin-right:6px}
+.eta .rends{color:var(--mute);font-size:12.5px}
 .eta b{font-variant-numeric:tabular-nums}
 .soon{color:var(--bad)}
 .trains{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
@@ -279,14 +281,20 @@ async function busNearby(lat, lon) {
       try { etas.push(...await tdx(p)); } catch (e) { console.warn(e.message); }
     }));
 
+    const routes = await routeEnds(etas);
     const STATUS = { 1: "尚未發車", 2: "交管不停靠", 3: "末班車已過", 4: "今日未營運" };
     return nearest.map(g => {
-      const rows = etas.filter(e => g.uids.includes(e.StopUID)).map(e => ({
+      const rows = etas.filter(e => g.uids.includes(e.StopUID)).map(e => {
+        const r = routes[e.RouteUID];
+        // 依行駛方向排出「起點 → 終點」
+        const ends = r && r.a && r.b ? (e.Direction === 1 ? [r.b, r.a] : [r.a, r.b]) : null;
+        return {
         route: e.RouteName?.Zh_tw || "",
+        ends,
         dir: e.Direction,
         min: e.EstimateTime != null ? Math.round(e.EstimateTime / 60) : null,
         status: e.EstimateTime != null ? null : (STATUS[e.StopStatus] || "無資料"),
-      }));
+      }; });
       // 同一路線同方向只留一筆
       const uniq = new Map();
       for (const r of rows) {
@@ -301,6 +309,36 @@ async function busNearby(lat, lon) {
       };
     });
   });
+}
+
+// 公車路線的起點、終點（存在手機 7 天）
+async function routeEnds(etas){
+  const out = {}, need = new Map();
+  for (const e of etas){
+    if (!e.RouteUID || out[e.RouteUID]) continue;
+    const c = LS.get("c_rt:" + e.RouteUID);
+    if (c && c.exp > Date.now()) { out[e.RouteUID] = c.val; continue; }
+    const pre = e.RouteUID.slice(0, 3);
+    const city = pre === "THB" ? "InterCity" : CITY[pre];
+    if (!city) continue;
+    if (!need.has(city)) need.set(city, new Set());
+    need.get(city).add(e.RouteUID);
+  }
+  await Promise.all([...need].map(async ([city, set]) => {
+    const uids = [...set].slice(0, 30);
+    const filter = encodeURIComponent(uids.map(u => `RouteUID eq '${u}'`).join(" or "));
+    const sel = "$select=RouteUID,DepartureStopNameZh,DestinationStopNameZh";
+    const p = city === "InterCity" ? `/basic/v2/Bus/Route/InterCity?$filter=${filter}&${sel}` : `/basic/v2/Bus/Route/City/${city}?$filter=${filter}&${sel}`;
+    try {
+      for (const r of await tdx(p)) {
+        const val = { a: r.DepartureStopNameZh || "", b: r.DestinationStopNameZh || "" };
+        out[r.RouteUID] = val;
+        LS.set("c_rt:" + r.RouteUID, { val, exp: Date.now() + 7 * 86400000 });
+      }
+      for (const u of uids) if (!out[u]) LS.set("c_rt:" + u, { val: {}, exp: Date.now() + 86400000 }); // 查不到的也記一天
+    } catch (e) { console.warn(e.message); }
+  }));
+  return out;
 }
 
 // ---------- 台鐵 / 高鐵：最近車站 + 接下來三班 ----------
@@ -545,7 +583,7 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "w2";
+const VERSION = "w3";
 function showMapErr(msg){
   const box = $("mapErr");
   box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>地圖載入有問題</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
@@ -874,7 +912,7 @@ function render(){
     h += S.buses.length ? S.buses.map(s => `<div class="card">
         <div class="row"><b style="flex:1">${esc(s.name)}</b><span class="mute">🚶 ${s.walk} 分（${s.dist} m）</span></div>
         ${s.arrivals.length ? `<div class="eta">${s.arrivals.slice(0, 8).map(a => `
-          <span>${esc(a.route)}${s.arrivals.filter(x => x.route === a.route).length > 1 ? `<span class="mute">（${a.dir === 1 ? "返程" : "去程"}）</span>` : ""}</span>
+          <span><b class="rno">${esc(a.route)}</b>${a.ends ? `<span class="rends">${esc(a.ends[0])} → ${esc(a.ends[1])}</span>` : (s.arrivals.filter(x => x.route === a.route).length > 1 ? `<span class="mute">（${a.dir === 1 ? "返程" : "去程"}）</span>` : "")}</span>
           <b class="${a.min != null && a.min <= 3 ? "soon" : ""}">${a.min != null ? (a.min <= 1 ? "進站中" : a.min + " 分") : `<span class="mute">${esc(a.status)}</span>`}</b>`).join("")}</div>`
           : `<div class="empty">目前沒有到站資料</div>`}
       </div>`).join("") : (S.nearLoading ? "" : `<div class="empty">附近 ${NEAR_M} 公尺內沒有公車站</div>`);
