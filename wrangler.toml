@@ -1,0 +1,15 @@
+# Cloudflare Worker 設定（tw-transit-api）
+# 金鑰（TDX_ID、TDX_SECRET、GOOGLE_KEY）放在 Cloudflare 的祕密裡，不寫在這裡
+name = "tw-transit-api"
+main = "worker.js"
+compatibility_date = "2025-06-01"
+workers_dev = true
+
+# 存 TDX 登入憑證
+[[kv_namespaces]]
+binding = "TOKEN_KV"
+id = "a98c41774471438b9cbb5220f7c3a8d5"
+
+# 每 5 分鐘檢查一次 TDX 憑證
+[triggers]
+crons = ["*/5 * * * *"]
