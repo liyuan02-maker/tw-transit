@@ -1,0 +1,37 @@
+# 每 6 小時向 TDX 取得登入憑證，送到 Cloudflare Worker
+name: TDX token
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+jobs:
+  token:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取得 TDX 憑證並送到 Worker
+        env:
+          TDX_ID: ${{ secrets.TDX_ID }}
+          TDX_SECRET: ${{ secrets.TDX_SECRET }}
+          ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+        run: |
+          set -e
+          for i in 1 2 3; do
+            code=$(curl -sS -o resp.json -w '%{http_code}' -X POST \
+              "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token" \
+              -H "content-type: application/x-www-form-urlencoded" \
+              --data-urlencode "grant_type=client_credentials" \
+              --data-urlencode "client_id=$TDX_ID" \
+              --data-urlencode "client_secret=$TDX_SECRET")
+            echo "TDX 回應：$code"
+            [ "$code" = "200" ] && break
+            sleep 20
+          done
+          if [ "$code" != "200" ]; then echo "TDX 登入失敗（$code），請檢查 GitHub 裡的 TDX_ID / TDX_SECRET"; cat resp.json | head -c 300; exit 1; fi
+          code=$(curl -sS -o out.json -w '%{http_code}' -X POST \
+            "https://tw-transit-api.liyuan02.workers.dev/set-token" \
+            -H "x-admin-key: $ADMIN_KEY" -H "content-type: application/json" --data @resp.json)
+          echo "Worker 回應：$code $(cat out.json)"
+          rm -f resp.json
+          [ "$code" = "200" ]
