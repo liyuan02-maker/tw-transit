@@ -19,4 +19,4 @@ crons = ["*/5 * * * *"]
 ADMIN_KEY_SHA256 = "2ffafad34e9693aa2be34e7dc0b9d04ad7e57a8338366182410c06f61b20dbb5"
 
 # Google 地圖 ID（3D 立體地圖用；空白就沒有立體建築）
-GOOGLE_MAP_ID = ""
+GOOGLE_MAP_ID = "adc52e43655662a4c0649133"
