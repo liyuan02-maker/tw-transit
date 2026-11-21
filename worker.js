@@ -118,7 +118,7 @@ export default {
     // 只給自己的網站用
     if (origin && !ALLOW.includes(origin)) return json({ error: "not allowed" }, 403, origin);
 
-    if (url.pathname === "/config") return json({ google: env.GOOGLE_KEY || "" }, 200, origin);
+    if (url.pathname === "/config") return json({ google: env.GOOGLE_KEY || "", mapId: env.GOOGLE_MAP_ID || "" }, 200, origin);
 
     if (url.pathname.startsWith("/tdx/")) {
       const path = url.pathname.slice(5);

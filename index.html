@@ -36,7 +36,7 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 #micBtn{background:#f1efe9;color:var(--ink);width:44px;display:grid;place-items:center;flex:0 0 auto}
 #micBtn.on{background:var(--bad);color:#fff;animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.45)}50%{box-shadow:0 0 0 8px rgba(220,38,38,0)}}
-.hint{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 76px);z-index:8;background:var(--ink);color:#fff;border-radius:999px;padding:8px 14px;font-size:14px;display:none;max-width:90vw;text-align:center}
+.hint{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--sheet-h) + 16px);z-index:8;background:var(--ink);color:#fff;border-radius:999px;padding:8px 14px;font-size:14px;display:none;max-width:90vw;text-align:center}
 #goBtn{background:var(--ink);color:#fff;padding:0 16px}
 .fab{position:fixed;right:12px;z-index:5;width:46px;height:46px;border-radius:50%;border:0;background:#fff;box-shadow:0 3px 12px rgba(0,0,0,.2);font-size:20px;cursor:pointer}
 #locBtn{bottom:calc(var(--sheet-h) + 12px)}
@@ -128,8 +128,27 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
   #locBtn{bottom:20px!important;display:block!important}
   #langBtn{bottom:74px!important;display:block!important}
   #areaBtn{left:calc(var(--panel) + (100vw - var(--panel)) / 2);top:16px}
-  #mapErr,.hint{left:calc(var(--panel) + 16px);right:16px;transform:none;top:16px}
+  #mapErr{left:calc(var(--panel) + 16px);right:16px;transform:none;top:16px}
+  .hint{left:calc(var(--panel) + (100vw - var(--panel)) / 2);bottom:24px!important}
   .leaflet-bottom{bottom:0!important}
+}
+.acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+.act{display:inline-flex;align-items:center;border:1.5px solid #000;background:#fff;border-radius:8px;padding:4px 10px;font:inherit;font-size:13px;font-weight:800;color:#000;text-decoration:none;cursor:pointer;line-height:1.3}
+.act:active{background:#eee}
+#mtype{position:fixed;right:12px;top:calc(env(safe-area-inset-top) + 76px);z-index:5;display:flex;flex-direction:column;background:#fff;border:2px solid #000;border-radius:12px;overflow:hidden;box-shadow:0 3px 12px rgba(0,0,0,.25)}
+#mtype button{border:0;border-top:1.5px solid #000;background:#fff;color:#000;font:800 13px/1 system-ui,"Noto Sans TC",sans-serif;padding:9px 8px;min-width:46px;cursor:pointer}
+#mtype button:first-child{border-top:0}
+#mtype button.on{background:#000;color:#fff}
+#mtype.osm button:not([data-mt="road"]){display:none}
+#compass{position:fixed;left:12px;right:74px;top:calc(env(safe-area-inset-top) + 76px);z-index:7;display:none;align-items:center;gap:12px;background:#fff;border:2.5px solid #000;border-radius:16px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.3)}
+#compass.on{display:flex}
+#cmpArrow{flex:0 0 auto;transition:transform .25s ease-out}
+#cmpName{font-size:16px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#cmpDist{font-size:28px;font-weight:900;line-height:1.1}
+#cmpClose{position:absolute;top:2px;right:6px;border:0;background:none;font-size:24px;font-weight:700;cursor:pointer;color:#000}
+@media (min-width: 820px){
+  #mtype{top:16px}
+  #compass{left:calc(var(--panel) + 16px);right:80px;top:16px;max-width:460px}
 }
 #mapErr{position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top) + 80px);z-index:7;max-width:560px;margin:0 auto;background:#fff;border:2px solid var(--bad);border-radius:14px;padding:12px 14px;font-size:14px;line-height:1.6;box-shadow:0 4px 18px rgba(0,0,0,.15);display:none}
 #mapErr b{color:var(--bad)}
@@ -152,6 +171,14 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 <button id="areaBtn">🔄 查這一區</button>
 <button class="fab" id="locBtn" title="回到我的位置">◎</button>
 <button class="fab" id="langBtn" title="中文 / English">EN</button>
+<div id="mtype">
+  <button data-mt="road" class="on">一般</button><button data-mt="sat">衛星</button><button data-mt="3d">3D</button><button data-mt="sv">街景</button>
+</div>
+<div id="compass">
+  <button id="cmpClose" aria-label="close">×</button>
+  <div id="cmpArrow"><svg viewBox="0 0 100 100" width="84" height="84"><circle cx="50" cy="50" r="46" fill="#fff" stroke="#000" stroke-width="3"/><path d="M50 10 L72 70 L50 58 L28 70 Z" fill="#c00000" stroke="#000" stroke-width="2.5" stroke-linejoin="round"/></svg></div>
+  <div style="flex:1;min-width:0"><div id="cmpName"></div><div id="cmpDist"></div><div id="cmpNote" class="mute"></div></div>
+</div>
 
 <div class="sheet" id="sheet">
   <div class="grab" id="grab"><span></span></div>
@@ -693,7 +720,7 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "w8";
+const VERSION = "w9";
 function showMapErr(msg){
   const box = $("mapErr");
   box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>${L("地圖載入有問題", "Map problem")}</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
@@ -730,8 +757,10 @@ const MAP = {
       try {
         this.kind = "google";
         const el = this.freshDiv();
-        this.g = new google.maps.Map(el, {center: {lat: 25.0478, lng: 121.5170}, zoom: 16,
-          disableDefaultUI: true, clickableIcons: false, gestureHandling: "greedy"});
+        const opts = {center: {lat: 25.0478, lng: 121.5170}, zoom: 16,
+          disableDefaultUI: true, clickableIcons: false, gestureHandling: "greedy"};
+        if (KEYS.mapId) Object.assign(opts, {mapId: KEYS.mapId, renderingType: "VECTOR", tiltInteractionEnabled: true, headingInteractionEnabled: true});
+        this.g = new google.maps.Map(el, opts);
         this.g.addListener("tilesloaded", () => { ok = true; });
         this.g.addListener("idle", () => this.moveCb && this.moveCb());
         this.g.addListener("dragstart", () => { followMe = false; });
@@ -752,6 +781,7 @@ const MAP = {
     this.kind = "leaflet"; this.g = null;
     const el = this.freshDiv();
     this.l = window.L.map(el, {zoomControl: false}).setView([25.0478, 121.5170], 16);
+    $("mtype").classList.add("osm");
     window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19,
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(this.l);
     this.l.on("moveend", () => this.moveCb && this.moveCb());
@@ -837,6 +867,61 @@ const MAP = {
     const c = this.l.getCenter(); return {lat: c.lat, lng: c.lng};
   },
   zoom(){ return this.kind === "google" ? this.g.getZoom() : this.l.getZoom(); },
+
+  // 只顯示你周圍 1 公里（在「附近」分頁）；查路線時解除
+  limitOn: false, limitAt: null,
+  limit(on){
+    this.limitOn = on;
+    if (!this.kind) return;
+    const me = S.me;
+    let bounds = null;
+    if (on && me){
+      const dLat = 1000 / 111320, dLon = 1000 / (111320 * Math.cos(me.lat * Math.PI / 180));
+      bounds = {south: me.lat - dLat, north: me.lat + dLat, west: me.lon - dLon, east: me.lon + dLon};
+      this.limitAt = {lat: me.lat, lon: me.lon};
+    }
+    if (this.kind === "google"){
+      this.g.setOptions({minZoom: on ? 15 : null, restriction: bounds ? {latLngBounds: bounds, strictBounds: false} : null});
+    } else {
+      this.l.setMinZoom(on ? 15 : 0);
+      this.l.setMaxBounds(bounds ? [[bounds.south, bounds.west], [bounds.north, bounds.east]] : null);
+    }
+  },
+  // 走動時，範圍跟著你移動
+  limitFollow(){
+    if (this.limitOn && S.me && (!this.limitAt || distM(S.me.lat, S.me.lon, this.limitAt.lat, this.limitAt.lon) > 150)) this.limit(true);
+  },
+
+  // 一般／衛星／3D／街景
+  type: "road",
+  setType(t){
+    if (this.kind !== "google"){ return; }
+    const g = this.g;
+    if (t === "sv"){ this.openStreetView(); return; }
+    this.type = t;
+    document.querySelectorAll("#mtype button").forEach(b => b.classList.toggle("on", b.dataset.mt === t));
+    if (t === "road"){ g.setMapTypeId("roadmap"); g.setTilt(0); g.setHeading(0); }
+    if (t === "sat"){ g.setMapTypeId("hybrid"); g.setTilt(0); g.setHeading(0); }
+    if (t === "3d"){
+      if (g.getZoom() < 17) g.setZoom(17);
+      if (KEYS.mapId){ g.setMapTypeId("roadmap"); g.setTilt(67.5); }
+      else { g.setMapTypeId("satellite"); g.setTilt(45); hint(L("還沒設定地圖 ID，先用衛星斜視；設定後會有立體建築", "No Map ID yet — showing tilted satellite instead"), 4000); }
+      if (S.heading != null) g.setHeading(S.heading);
+    }
+  },
+  openStreetView(){
+    const at = S.me || {lat: 25.0478, lon: 121.517};
+    new google.maps.StreetViewService().getPanorama({location: {lat: at.lat, lng: at.lon}, radius: 120, source: google.maps.StreetViewSource.OUTDOOR}, (data, status) => {
+      if (status !== "OK"){ hint(L("這附近沒有街景", "No Street View near here"), 3000); return; }
+      const pano = this.g.getStreetView();
+      pano.setOptions({position: data.location.latLng, pov: {heading: S.heading ?? 0, pitch: 0}, visible: true,
+        addressControl: false, fullscreenControl: false, enableCloseButton: true, motionTracking: true, motionTrackingControl: true});
+      document.querySelectorAll("#mtype button").forEach(b => b.classList.toggle("on", b.dataset.mt === "sv"));
+      const l = pano.addListener("visible_changed", () => {
+        if (!pano.getVisible()){ google.maps.event.removeListener(l); document.querySelectorAll("#mtype button").forEach(b => b.classList.toggle("on", b.dataset.mt === this.type)); }
+      });
+    });
+  },
 };
 function notice(msg){ showMapErr(msg); clearTimeout(notice.t); notice.t = setTimeout(() => $("mapErr").style.display = "none", 9000); }
 
@@ -883,7 +968,7 @@ function el(html){ const d = document.createElement("div"); d.innerHTML = html; 
 let watchId = null, accCircle = null, lastNearAt = 0, followMe = true;
 function locate(){
   followMe = true;
-  if (S.me && S.located) MAP.panTo(S.me.lat, S.me.lon, 17);
+  if (S.me && S.located) MAP.panTo(S.me.lat, S.me.lon, 16);
   if (!navigator.geolocation){ useFallback(L("此瀏覽器不支援定位", "This browser doesn't support location")); return; }
   if (watchId != null) return;   // 已經在追蹤了
   let first = true;
@@ -893,7 +978,10 @@ function locate(){
     S.acc = Math.round(c.accuracy);
     S.located = true; S.locMsg = null;
     placeMe();
-    if (first){ first = false; MAP.panTo(S.me.lat, S.me.lon, 17); loadNear(S.me); lastNearAt = Date.now(); return; }
+    S.fixAt = new Date();
+    if (first){ first = false; MAP.panTo(S.me.lat, S.me.lon, 16); if (S.tab === "near") MAP.limit(true); loadNear(S.me); lastNearAt = Date.now(); updateCompass(); return; }
+    MAP.limitFollow();
+    updateCompass();
     if (followMe) MAP.panTo(S.me.lat, S.me.lon);
     // 走離上次查詢的地方超過 100 公尺，自動更新附近（最快 30 秒一次）
     if (S.area && distM(S.me.lat, S.me.lon, S.area.lat, S.area.lon) > 100 && Date.now() - lastNearAt > 30000 && Date.now() > tdxCooldown){
@@ -906,13 +994,17 @@ function locate(){
     useFallback(e.code === 1 ? L("你沒有允許定位", "Location permission denied") : L("無法取得定位", "Couldn't get your location"));
   }, {enableHighAccuracy: true, timeout: 20000, maximumAge: 0});
 }
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && watchId != null){ navigator.geolocation.clearWatch(watchId); watchId = null; locate(); }
+});
 function updateAcc(){
   const el = document.getElementById("accLine");
   if (el && S.acc != null) el.innerHTML = accText();
 }
 const accText = () => {
   const a = S.acc, q = a <= 15 ? ["#16a34a", L("很準", "good")] : a <= 50 ? ["#f59e0b", L("普通", "fair")] : ["#dc2626", L("不準", "poor")];
-  return `<span style="color:${q[0]}">●</span> ${L("定位誤差約", "Location accuracy ±")}${L(" ±", "")}${a} m（${q[1]}）`;
+  const t = S.fixAt ? S.fixAt.toLocaleTimeString("zh-TW", {hour12: false}) : "";
+  return `<span style="color:${q[0]}">●</span> ${L("定位誤差約", "Location accuracy ±")}${L(" ±", "")}${a} m（${q[1]}）${t ? `・${L("更新於", "updated")} ${t}` : ""}`;
 };
 function useFallback(msg){
   S.me = {lat: 25.0478, lon: 121.5170}; S.located = false; S.locMsg = msg + L("，先以台北車站為起點。", " — using Taipei Main Station as the start.");
@@ -963,6 +1055,11 @@ function bikeTag(b){
   return "";
 }
 
+// 每個地點的「指向」（指南針）與「導航」（開 Google 地圖步行導航）
+const gnav = (lat, lon) => `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`;
+const acts = (name, lat, lon) => lat == null ? "" : `<div class="acts">
+  <button class="act" data-cmp="${lat},${lon}" data-name="${esc(name)}">🧭 ${L("指向", "Point")}</button>
+  <a class="act" href="${gnav(lat, lon)}" target="_blank" rel="noopener">${L("步行導航", "Walk there")} ↗</a></div>`;
 const showKind = k => S.nearFilter === "all" || S.nearFilter === k;
 function drawNearMarkers(){
   bikeMarkers.forEach(rm); busMarkers.forEach(rm); metroMarkers.forEach(rm); railMarkers.forEach(rm);
@@ -987,7 +1084,7 @@ async function doPlan(text){
   hideSugg();
   { const h = (LS.get("hist") || []).filter(x => x !== text); h.unshift(text); LS.set("hist", h.slice(0, 15)); }
   S.destText = text; S.tab = "route"; S.planLoading = true; S.plan = null; S.planErr = null; S.selected = null;
-  clearRoute(); openSheet(true); render();
+  clearRoute(); openSheet(true); render(); MAP.limit(false);
   try {
     S.plan = await api(`/api/plan?lat=${S.me.lat}&lon=${S.me.lon}&to=${encodeURIComponent(text)}`);
     const t = S.plan.to;
@@ -1092,7 +1189,7 @@ function render(){
     h += `<div class="sec"><h3>${badge("bike")}${L(`附近 ${NEAR_M} 公尺的 YouBike`, `YouBike within ${NEAR_M} m`)}<small>${L("可借 / 可還", "Bikes / Docks")}</small></h3>`;
     h += S.bikes.length ? S.bikes.map(b => `<div class="card ${S.focusBike === b.id ? "sel" : ""}" data-bike="${esc(b.id)}">
         <div class="row">
-          <div style="flex:1;min-width:0"><b>${esc(b.name)}</b>${bikeTag(b)}<div class="mute">🚶 ${b.walk} ${L("分", "min")}（${b.dist} m）</div></div>
+          <div style="flex:1;min-width:0"><b>${esc(b.name)}</b>${bikeTag(b)}<div class="mute">🚶 ${b.walk} ${L("分", "min")}（${b.dist} m）</div>${acts(b.name, b.lat, b.lon)}</div>
           <div style="text-align:center"><div class="num" style="color:${bikeColor(b)}">${b.bikes ?? "?"}</div><div class="mute">${L("可借", "Bikes")}</div></div>
           <div style="text-align:center"><div class="num" style="color:${b.docks === 0 ? "#c00000" : "#000"}">${b.docks ?? "?"}</div><div class="mute">${L("空位", "Docks")}</div></div>
         </div></div>`).join("") : (S.pending.has("bike") ? `<div class="empty"><span class="spin"></span> ${L("讀取中…", "Loading…")}</div>` : `<div class="empty">${L(`附近 ${NEAR_M} 公尺內沒有 YouBike 站`, `No YouBike stations within ${NEAR_M} m`)}</div>`);
@@ -1103,7 +1200,7 @@ function render(){
     h += `<div class="sec"><h3>${badge("metro")}${L(`附近 ${NEAR_M} 公尺的捷運站`, `Metro stations within ${NEAR_M} m`)}</h3>`;
     h += S.metros.length ? S.metros.map(m => `<div class="card tap" data-goto="${m.lat},${m.lon}">
         <div class="row"><div style="flex:1"><b>${esc(m.name)}</b>
-          <div class="lines">${m.lines.map(x => `<span class="lb" style="background:${x.color};color:${x.color === "#fedb00" ? "#333" : "#fff"}">${esc(x.id)}</span>`).join("")}</div></div>
+          <div class="lines">${m.lines.map(x => `<span class="lb" style="background:${x.color};color:${x.color === "#fedb00" ? "#333" : "#fff"}">${esc(x.id)}</span>`).join("")}</div>${acts(m.name, m.lat, m.lon)}</div>
           <span class="mute">🚶 ${m.walk} ${L("分", "min")}（${m.dist} m）</span></div></div>`).join("")
       : (S.pending.has("metro") ? `<div class="empty"><span class="spin"></span> ${L("讀取中…", "Loading…")}</div>` : `<div class="empty">${L(`附近 ${NEAR_M} 公尺內沒有捷運站`, `No metro stations within ${NEAR_M} m`)}</div>`);
     h += `</div>`;
@@ -1113,6 +1210,7 @@ function render(){
     h += `<div class="sec"><h3>${badge("bus")}${L(`附近 ${NEAR_M} 公尺的公車站牌`, `Bus stops within ${NEAR_M} m`)}<small>${L("每 60 秒更新", "Updates every 60s")}</small></h3>`;
     h += S.buses.length ? S.buses.map(s => `<div class="card">
         <div class="row"><b style="flex:1">${esc(s.name)}</b><span class="mute">🚶 ${s.walk} ${L("分", "min")}（${s.dist} m）</span></div>
+        ${acts(s.name, s.lat, s.lon)}
         ${s.arrivals.length ? `<div class="eta">${s.arrivals.slice(0, 8).map(a => `
           <span><b class="rno">${esc(a.route)}</b>${a.ends ? `<span class="rends">${esc(a.ends[0])} → ${esc(a.ends[1])}</span>` : (s.arrivals.filter(x => x.route === a.route).length > 1 ? `<span class="mute">（${a.dir === 1 ? L("返程", "return") : L("去程", "outbound")}）</span>` : "")}</span>
           ${a.min != null
@@ -1129,7 +1227,7 @@ function render(){
       h += `<div class="sec"><h3>${badge(k)}${k === "tra" ? L("最近的台鐵站", "Nearest TRA station") : L("最近的高鐵站", "Nearest THSR station")}</h3>`;
       if (st && st.err) h += `<div class="err">${esc(st.err)}</div>`;
       else if (st) h += `<div class="card tap" data-goto="${st.lat},${st.lon}"><div class="row"><b style="flex:1">${esc(st.name)}${k === "thsr" ? L("站", " Station") : ""}</b>
-          <span class="mute">${st.dist < 2500 ? `🚶 ${st.walk} ${L("分", "min")}（${st.dist} m）` : L(`距離 ${(st.dist / 1000).toFixed(1)} 公里`, `${(st.dist / 1000).toFixed(1)} km away`)}</span></div></div>`;
+          <span class="mute">${st.dist < 2500 ? `🚶 ${st.walk} ${L("分", "min")}（${st.dist} m）` : L(`距離 ${(st.dist / 1000).toFixed(1)} 公里`, `${(st.dist / 1000).toFixed(1)} km away`)}</span></div>${acts(st.name, st.lat, st.lon)}</div>`;
       else h += S.pending.has("rail") ? `<div class="empty"><span class="spin"></span> ${L("讀取中…", "Loading…")}</div>` : `<div class="empty">${L("讀不到車站資料", "No station data")}</div>`;
       h += `</div>`;
     }
@@ -1139,7 +1237,7 @@ function render(){
     if (S.planErr) h += `<div class="err">${esc(S.planErr)}</div>`;
     const p = S.plan;
     if (p){
-      h += `<div class="mute" style="margin-bottom:10px">${L("目的地：", "Destination: ")}${esc(p.to.name)}${S.located ? "" : L("（起點：台北車站）", " (from Taipei Main Station)")}</div>`;
+      h += `<div class="mute" style="margin-bottom:10px">${L("目的地：", "Destination: ")}${esc(p.to.name)}${S.located ? "" : L("（起點：台北車站）", " (from Taipei Main Station)")}${acts(p.to.name, p.to.lat, p.to.lon)}</div>`;
       const list = (kind, title, icon) => {
         const r = p[kind];
         let inner = !r.ok ? `<div class="err">${esc(r.e)}</div>`
@@ -1157,6 +1255,8 @@ function render(){
   $("body").innerHTML = h;
   document.querySelectorAll("[data-route]").forEach(c => c.onclick = () => showRoute(c.dataset.route));
   document.querySelectorAll("[data-nf]").forEach(c => c.onclick = () => { S.nearFilter = c.dataset.nf; LS.set("nf", S.nearFilter); drawNearMarkers(); render(); $("body").scrollTop = 0; });
+  document.querySelectorAll("[data-cmp]").forEach(c => c.onclick = e => { e.stopPropagation(); const [a, b] = c.dataset.cmp.split(",").map(Number); startCompass(c.dataset.name, a, b); });
+  document.querySelectorAll("a.act").forEach(c => c.addEventListener("click", e => e.stopPropagation()));
   document.querySelectorAll("[data-goto]").forEach(c => c.onclick = () => { const [a, b] = c.dataset.goto.split(",").map(Number); MAP.panTo(a, b, 16); });
   document.querySelectorAll("[data-bike]").forEach(c => c.onclick = () => {
     const b = S.bikes.find(x => x.id === c.dataset.bike); if (!b) return;
@@ -1180,7 +1280,11 @@ $("grab").onclick = () => {
   else s.classList.add("big");
   syncFab();
 };
-document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => { S.tab = b.dataset.t; openSheet($("sheet").classList.contains("big")); render(); });
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  S.tab = b.dataset.t; openSheet($("sheet").classList.contains("big")); render();
+  if (S.tab === "near"){ MAP.limit(true); if (S.me) MAP.panTo(S.me.lat, S.me.lon, 16); } else MAP.limit(false);
+});
+document.querySelectorAll("#mtype button").forEach(b => b.onclick = () => MAP.setType(b.dataset.mt));
 // ====== 搜尋建議 ======
 let suggSeq = 0, suggTimer, placesOK = true, sessTok = null;
 const newTok = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
@@ -1263,6 +1367,56 @@ $("dest").addEventListener("blur", () => setTimeout(() => { if (document.activeE
 $("map").addEventListener("pointerdown", hideSugg);
 
 $("form").onsubmit = e => { e.preventDefault(); const v = $("dest").value.trim(); if (v) { $("dest").blur(); doPlan(v); } };
+// ====== 指南針箭頭 ======
+let cmpTarget = null, cmpAngle = 0, orientOn = false;
+function bearing(aLat, aLon, bLat, bLon){
+  const r = Math.PI / 180, y = Math.sin((bLon - aLon) * r) * Math.cos(bLat * r);
+  const x = Math.cos(aLat * r) * Math.sin(bLat * r) - Math.sin(aLat * r) * Math.cos(bLat * r) * Math.cos((bLon - aLon) * r);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+function onOrient(e){
+  let h = null;
+  if (typeof e.webkitCompassHeading === "number") h = e.webkitCompassHeading;          // iPhone
+  else if (e.absolute && typeof e.alpha === "number") h = (360 - e.alpha) % 360;        // Android
+  if (h == null) return;
+  h = (h + (screen.orientation?.angle || 0)) % 360;
+  S.heading = h; updateCompass();
+  if (MAP.kind === "google" && MAP.type === "3d" && KEYS.mapId && Date.now() - (onOrient.t || 0) > 500){ onOrient.t = Date.now(); MAP.g.setHeading(h); }
+}
+async function startOrientation(){
+  if (orientOn) return;
+  try {
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function"){
+      const r = await DeviceOrientationEvent.requestPermission();   // iPhone 要先同意
+      if (r !== "granted"){ hint(L("沒有允許使用指南針，箭頭會以北方朝上", "Compass not allowed — arrow uses north-up"), 4000); return; }
+    }
+    window.addEventListener("deviceorientationabsolute", onOrient, true);
+    window.addEventListener("deviceorientation", onOrient, true);
+    orientOn = true;
+  } catch (e) { /* 不支援就用北方朝上 */ }
+}
+function startCompass(name, lat, lon){
+  cmpTarget = {name, lat, lon};
+  $("compass").classList.add("on");
+  $("cmpName").textContent = "🧭 " + name;
+  startOrientation();
+  updateCompass();
+}
+$("cmpClose").onclick = () => { cmpTarget = null; $("compass").classList.remove("on"); };
+function updateCompass(){
+  if (!cmpTarget || !S.me) return;
+  const d = distM(S.me.lat, S.me.lon, cmpTarget.lat, cmpTarget.lon);
+  const b = bearing(S.me.lat, S.me.lon, cmpTarget.lat, cmpTarget.lon);
+  const target = S.heading != null ? b - S.heading : b;
+  let delta = ((target - cmpAngle) % 360 + 540) % 360 - 180;   // 轉最短的方向
+  cmpAngle += delta;
+  $("cmpArrow").style.transform = `rotate(${cmpAngle}deg)`;
+  $("cmpDist").textContent = d < 1000 ? `${Math.round(d)} m` : `${(d / 1000).toFixed(1)} km`;
+  $("cmpNote").textContent = d < 25 ? L("快到了！", "You're almost there!")
+    : S.heading != null ? L(`手機平放，照箭頭方向走・約 ${walkMin(d)} 分鐘`, `Hold phone flat and follow the arrow · ~${walkMin(d)} min`)
+    : L("沒有指南針資料：箭頭以地圖北方朝上為準", "No compass data: arrow is relative to north");
+}
+
 // ====== 語音輸入 ======
 let hintTimer;
 function hint(t, ms){ const h = $("hint"); h.textContent = t; h.style.display = t ? "block" : "none"; clearTimeout(hintTimer); if (ms) hintTimer = setTimeout(() => h.style.display = "none", ms); }
@@ -1316,6 +1470,8 @@ render();
   document.querySelector('.tabs [data-t="near"]').textContent = L("附近", "Nearby");
   document.querySelector('.tabs [data-t="route"]').textContent = L("路線", "Routes");
   $("langBtn").textContent = EN ? "中" : "EN";
+  const mt = {road: L("一般", "Map"), sat: L("衛星", "Sat"), "3d": "3D", sv: L("街景", "Street")};
+  document.querySelectorAll("#mtype button").forEach(b => b.textContent = mt[b.dataset.mt]);
   $("langBtn").onclick = () => { LS.set("lang", EN ? "zh" : "en"); location.reload(); };
 })();
 
