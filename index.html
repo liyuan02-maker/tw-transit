@@ -132,6 +132,7 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
   .hint{left:calc(var(--panel) + (100vw - var(--panel)) / 2);bottom:24px!important}
   .leaflet-bottom{bottom:0!important}
 }
+.bkt{display:grid;gap:5px;margin-top:8px;font-size:14px;font-weight:600;line-height:1.45}
 .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
 .act{display:inline-flex;align-items:center;border:1.5px solid #000;background:#fff;border-radius:8px;padding:4px 10px;font:inherit;font-size:13px;font-weight:800;color:#000;text-decoration:none;cursor:pointer;line-height:1.3}
 .act:active{background:#eee}
@@ -139,6 +140,17 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 .act.sub{border-color:#6b7280;color:#2f3640;font-weight:700}
 #walkBar{position:fixed;left:12px;right:74px;top:calc(env(safe-area-inset-top) + 76px);z-index:7;display:none;align-items:center;gap:10px;background:#fff;border:2.5px solid #000;border-radius:16px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.3)}
 #walkBar.on{display:flex}
+#navBar{position:fixed;left:12px;right:74px;top:calc(env(safe-area-inset-top) + 76px);z-index:7;display:none;align-items:center;gap:12px;background:#000;color:#fff;border-radius:16px;padding:12px 14px;box-shadow:0 4px 18px rgba(0,0,0,.35)}
+#navBar.on{display:flex}
+#navArrow{flex:0 0 auto;width:62px;height:62px;border-radius:14px;background:#fff;color:#000;display:grid;place-items:center;font-size:44px;font-weight:900;line-height:1}
+#navDist{font-size:30px;font-weight:900;line-height:1.05}
+#navText{font-size:17px;font-weight:800;line-height:1.3;margin-top:2px}
+#navBar .mute{color:#d1d5db;font-size:13px;margin-top:3px}
+#navBar .act{background:#fff;color:#000;border-color:#fff}
+body.nav .top{display:none}
+body.nav #navBar{top:calc(env(safe-area-inset-top) + 12px)}
+body.nav #mtype{top:calc(env(safe-area-inset-top) + 150px)}
+@media (min-width: 820px){ #navBar{left:calc(var(--panel) + 16px);right:80px;top:16px!important;max-width:520px} }
 #walkBar .wt{font-size:28px;font-weight:900;line-height:1.1;white-space:nowrap}
 #walkBar .wn{font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #walkBar .wx{border:0;background:none;font-size:26px;font-weight:700;cursor:pointer;color:#000;padding:0 4px}
@@ -184,8 +196,20 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 </div>
 <div id="walkBar">
   <div style="flex:1;min-width:0"><div class="wn" id="walkName"></div><div class="wt" id="walkTime"></div><div class="mute" id="walkNote"></div></div>
-  <a class="act sub" id="walkG" target="_blank" rel="noopener">Google ↗</a>
+  <div style="display:flex;flex-direction:column;gap:6px;align-items:stretch">
+    <button class="act main" id="walkStart" style="font-size:15px;padding:8px 12px">▶ 開始導航</button>
+    <a class="act sub" id="walkG" target="_blank" rel="noopener" style="justify-content:center">Google ↗</a>
+  </div>
   <button class="wx" id="walkClose" aria-label="close">×</button>
+</div>
+<div id="navBar">
+  <div id="navArrow">↑</div>
+  <div style="flex:1;min-width:0">
+    <div id="navDist"></div>
+    <div id="navText"></div>
+    <div id="navLeft" class="mute"></div>
+  </div>
+  <button class="act" id="navEnd" style="align-self:flex-start">結束</button>
 </div>
 <div id="compass">
   <button id="cmpClose" aria-label="close">×</button>
@@ -733,7 +757,7 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "w11";
+const VERSION = "w13";
 function showMapErr(msg){
   const box = $("mapErr");
   box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>${L("地圖載入有問題", "Map problem")}</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
@@ -983,7 +1007,7 @@ function el(html){ const d = document.createElement("div"); d.innerHTML = html; 
 var watchId = null, accCircle = null, lastNearAt = 0, followMe = true;
 function locate(){
   followMe = true;
-  if (S.me && S.located) MAP.centerOn(S.me.lat, S.me.lon, 16);
+  if (S.me && S.located) MAP.centerOn(S.me.lat, S.me.lon, NAV ? 18 : 16);
   if (!navigator.geolocation){ useFallback(L("此瀏覽器不支援定位", "This browser doesn't support location")); return; }
   if (watchId != null) return;   // 已經在追蹤了
   let first = true;
@@ -997,7 +1021,8 @@ function locate(){
     if (first){ first = false; MAP.centerOn(S.me.lat, S.me.lon, 16); setTimeout(() => followMe && MAP.centerOn(S.me.lat, S.me.lon), 800); if (S.tab === "near") MAP.limit(true); loadNear(S.me); lastNearAt = Date.now(); updateCompass(); return; }
     MAP.limitFollow();
     updateCompass();
-    if (followMe) MAP.centerOn(S.me.lat, S.me.lon);
+    if (followMe) MAP.centerOn(S.me.lat, S.me.lon, NAV ? 18 : undefined);
+    if (NAV) navUpdate();
     // 走離上次查詢的地方超過 100 公尺，自動更新附近（最快 30 秒一次）
     if (S.area && distM(S.me.lat, S.me.lon, S.area.lat, S.area.lon) > 100 && Date.now() - lastNearAt > 30000 && Date.now() > tdxCooldown){
       lastNearAt = Date.now(); loadNear(S.me, true);
@@ -1100,11 +1125,15 @@ async function doPlan(text){
   hideSugg();
   { const h = (LS.get("hist") || []).filter(x => x !== text); h.unshift(text); LS.set("hist", h.slice(0, 15)); }
   S.destText = text; S.tab = "route"; S.planLoading = true; S.plan = null; S.planErr = null; S.selected = null;
-  if (walkDest) closeWalk();
+  if (walkDest || NAV) closeWalk();
+  navLines.forEach(rm); navLines = [];
   clearRoute(); openSheet(true); render(); MAP.limit(false);
   try {
     S.plan = await api(`/api/plan?lat=${S.me.lat}&lon=${S.me.lon}&to=${encodeURIComponent(text)}`);
     const t = S.plan.to;
+    const plan = S.plan;
+    plan.bike = {loading: true};
+    planBike(S.me, t).then(v => { plan.bike = v; }, e => { plan.bike = {err: e.message}; }).finally(() => { if (S.plan === plan) render(); });
     rm(destMarker);
     destMarker = mk({lat: t.lat, lng: t.lon}, ICON.dest(), t.name, 998, true);
     MAP.fit([[S.me.lat, S.me.lon], [t.lat, t.lon]], 0.5);
@@ -1262,6 +1291,7 @@ function render(){
           : `<div class="empty">${L("找不到合適的班次", "No suitable departures")}</div>`;
         return `<div class="sec"><h3>${badge(icon)}${title}<small>${L("接下來 3 班・點選看路線", "Next 3 · tap for route")}</small></h3>${inner}</div>`;
       };
+      h += `<div class="sec"><h3>${badge("bike")}YouBike<small>${L("走 → 騎 → 走", "walk → ride → walk")}</small></h3>${bikeCard(p.bike)}</div>`;
       h += list("metro", L("捷運（台北・桃園機捷・台中・高雄）", "Metro (Taipei · Taoyuan Airport · Taichung · Kaohsiung)"), "metro");
       h += list("bus", L("公車", "Bus"), "bus");
       h += railSec("tra", L("台鐵", "TRA (Railway)"), "var(--tra)", p.tra);
@@ -1272,6 +1302,13 @@ function render(){
   $("body").innerHTML = h;
   document.querySelectorAll("[data-route]").forEach(c => c.onclick = () => showRoute(c.dataset.route));
   document.querySelectorAll("[data-nf]").forEach(c => c.onclick = () => { S.nearFilter = c.dataset.nf; LS.set("nf", S.nearFilter); drawNearMarkers(); render(); $("body").scrollTop = 0; });
+  if ($("bikeGo")) $("bikeGo").onclick = () => { const b = S.plan?.bike; if (b?.legs){ if (walkDest) closeWalk(); startNav(b.legs.map(l => ({...l}))); } };
+  if ($("bikeShow")) $("bikeShow").onclick = () => {
+    const b = S.plan?.bike; if (!b?.legs) return;
+    clearRoute(); drawLegs(b.legs);
+    if (!matchMedia("(min-width: 820px)").matches){ const sh = $("sheet"); sh.classList.remove("big"); syncFab(); }
+    setTimeout(() => MAP.fit([[S.me.lat, S.me.lon], ...b.legs.flatMap(l => l.r.path)], 0.45), 300);
+  };
   document.querySelectorAll("[data-walk]").forEach(c => c.onclick = e => { e.stopPropagation(); const [a, b] = c.dataset.walk.split(",").map(Number); showWalk(c.dataset.name, a, b); });
   document.querySelectorAll("[data-cmp]").forEach(c => c.onclick = e => { e.stopPropagation(); const [a, b] = c.dataset.cmp.split(",").map(Number); startCompass(c.dataset.name, a, b); });
   document.querySelectorAll("a.act").forEach(c => c.addEventListener("click", e => e.stopPropagation()));
@@ -1290,7 +1327,7 @@ function syncFab(){
   document.documentElement.style.setProperty("--sheet-h", h);
   $("locBtn").style.display = s.classList.contains("big") ? "none" : "block";
   $("langBtn").style.display = s.classList.contains("big") ? "none" : "block";
-  if (followMe && !walkDest && S.me && S.located && S.tab === "near") setTimeout(() => MAP.centerOn(S.me.lat, S.me.lon), 300);   // 等抽屜動畫結束
+  if (followMe && !walkDest && !NAV && S.me && S.located && S.tab === "near") setTimeout(() => MAP.centerOn(S.me.lat, S.me.lon), 300);   // 等抽屜動畫結束
 }
 $("grab").onclick = () => {
   const s = $("sheet");
@@ -1387,22 +1424,37 @@ $("map").addEventListener("pointerdown", hideSugg);
 
 $("form").onsubmit = e => { e.preventDefault(); const v = $("dest").value.trim(); if (v) { $("dest").blur(); doPlan(v); } };
 // ====== 步行路線（直接畫在網頁地圖上）======
-var walkLine = null, walkDest = null, walkSeq = 0;
-async function walkRoute(from, to){
+var walkLine = null, walkDest = null, walkSeq = 0, walkRouteData = null;
+const walkRoute = (from, to) => routeFor(from, to, "WALK");
+// 騎 YouBike：先用 Google 的自行車路線；台灣沒有的話，改用步行路線、以時速約 12 公里估算
+async function bikeRoute(from, to){
+  try { return await routeFor(from, to, "BICYCLE"); }
+  catch (e) {
+    const r = await routeFor(from, to, "WALK");
+    return {...r, sec: r.m / 200 * 60, approx: true};
+  }
+}
+async function routeFor(from, to, mode){
   const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
     method: "POST",
     headers: {"content-type": "application/json", "X-Goog-Api-Key": KEYS.google,
-      "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline"},
+      "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.steps.distanceMeters,routes.legs.steps.polyline.encodedPolyline,routes.legs.steps.navigationInstruction"},
     body: JSON.stringify({
       origin: {location: {latLng: {latitude: from.lat, longitude: from.lon}}},
       destination: {location: {latLng: {latitude: to.lat, longitude: to.lon}}},
-      travelMode: "WALK", languageCode: EN ? "en" : "zh-TW", regionCode: "TW",
+      travelMode: mode, languageCode: EN ? "en" : "zh-TW", regionCode: "TW",
     }),
   });
   const j = await res.json();
   if (!res.ok || !j.routes?.length) throw new Error(j.error?.message || "no route");
   const r = j.routes[0];
-  return {sec: secs(r.duration), m: r.distanceMeters || 0, path: decodePolyline(r.polyline.encodedPolyline)};
+  const steps = (r.legs || []).flatMap(l => l.steps || []).map(st => ({
+    m: st.distanceMeters || 0,
+    path: st.polyline?.encodedPolyline ? decodePolyline(st.polyline.encodedPolyline) : [],
+    text: st.navigationInstruction?.instructions || "",
+    man: st.navigationInstruction?.maneuver || "",
+  }));
+  return {sec: secs(r.duration), m: r.distanceMeters || 0, path: decodePolyline(r.polyline.encodedPolyline), steps};
 }
 async function showWalk(name, lat, lon){
   if (!S.me) return;
@@ -1425,6 +1477,8 @@ async function showWalk(name, lat, lon){
     r = {sec: d / 75 * 60 * 1.3, m: Math.round(d * 1.3), path: [[S.me.lat, S.me.lon], [lat, lon]], rough: true};
   }
   if (my !== walkSeq) return;
+  walkRouteData = r;
+  $("walkStart").style.display = r.rough ? "none" : "";
   walkLine = MAP.line(r.path, "#1d4ed8");
   const min = Math.max(1, Math.round(r.sec / 60));
   $("walkTime").innerHTML = `${min}<small style="font-size:15px;margin-left:3px">${L("分鐘", "min")}</small><span style="font-size:17px;font-weight:800;margin-left:8px;white-space:nowrap">${r.m < 1000 ? r.m + " m" : (r.m / 1000).toFixed(1) + " km"}</span>`;
@@ -1432,14 +1486,229 @@ async function showWalk(name, lat, lon){
   setTimeout(() => MAP.fit([[S.me.lat, S.me.lon], [lat, lon], ...r.path], 0.25), 350);
 }
 function closeWalk(){
-  walkSeq++; walkDest = null;
+  if (NAV) stopNav(true);
+  navLines.forEach(rm); navLines = [];
+  walkSeq++; walkDest = null; walkRouteData = null;
   rm(walkLine); walkLine = null;
   $("walkBar").classList.remove("on");
   const sh = $("sheet"); if (sh.classList.contains("small")) { sh.classList.remove("small"); syncFab(); }
   if (S.tab === "near"){ followMe = true; MAP.limit(true); if (S.me) MAP.centerOn(S.me.lat, S.me.lon, 16); }
 }
 $("walkClose").onclick = closeWalk;
-$("walkG").addEventListener("click", e => e.stopPropagation());
+$("walkStart").onclick = () => startNav();
+$("navEnd").onclick = () => closeWalk();
+
+// ====== 網頁地圖上的導航（可多段：走路 → 騎 YouBike → 走路）======
+var NAV = null, navLines = [];
+const MAN = {TURN_LEFT: "←", TURN_RIGHT: "→", TURN_SLIGHT_LEFT: "↖", TURN_SLIGHT_RIGHT: "↗", TURN_SHARP_LEFT: "↙", TURN_SHARP_RIGHT: "↘",
+  UTURN_LEFT: "↶", UTURN_RIGHT: "↷", STRAIGHT: "↑", DEPART: "↑", NAME_CHANGE: "↑", MERGE: "↑", RAMP_LEFT: "↖", RAMP_RIGHT: "↗",
+  FORK_LEFT: "↖", FORK_RIGHT: "↗", ROUNDABOUT_LEFT: "⟲", ROUNDABOUT_RIGHT: "⟳", FERRY: "⛴"};
+const LEG_COLOR = {walk: "#1d4ed8", bike: "#d97706"};
+function toXY(lat, lon, lat0){ return [lon * 111320 * Math.cos(lat0 * Math.PI / 180), lat * 110540]; }
+function buildGeo(r){
+  const pts = [], cum = [], stepEnd = [];
+  let total = 0;
+  const lat0 = r.path[0]?.[0] || S.me.lat;
+  const push = p => {
+    if (pts.length){ const a = pts[pts.length - 1]; total += distM(a[0], a[1], p[0], p[1]); }
+    pts.push(p); cum.push(total);
+  };
+  if (r.steps?.length && r.steps.some(st => st.path.length)){
+    for (const st of r.steps){ st.path.forEach((p, i) => { if (i || !pts.length) push(p); }); stepEnd.push(total); }
+  } else { r.path.forEach(push); stepEnd.push(total); }
+  return {r, pts, cum, stepEnd, total, lat0, xy: pts.map(p => toXY(p[0], p[1], lat0)), off: 0, lastStep: -1};
+}
+function snap(g, lat, lon){
+  const [px, py] = toXY(lat, lon, g.lat0);
+  let best = {d: Infinity, along: 0};
+  for (let i = 0; i < g.xy.length - 1; i++){
+    const [ax, ay] = g.xy[i], [bx, by] = g.xy[i + 1];
+    const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+    const qx = ax + t * dx, qy = ay + t * dy, d = Math.hypot(px - qx, py - qy);
+    if (d < best.d) best = {d, along: g.cum[i] + t * (g.cum[i + 1] - g.cum[i])};
+  }
+  return best;
+}
+const fmtM = m => m < 1000 ? `${Math.max(0, Math.round(m / 10) * 10)} m` : `${(m / 1000).toFixed(1)} km`;
+function drawLegs(legs){
+  navLines.forEach(rm); navLines = legs.map(l => MAP.line(l.r.path, LEG_COLOR[l.mode]));
+}
+// legs：[{mode: "walk"|"bike", dest: {name, lat, lon, id?}, r: 路線}]
+async function startNav(legs){
+  legs = legs || (walkRouteData && walkDest ? [{mode: "walk", dest: walkDest, r: walkRouteData}] : null);
+  if (!legs || !S.me) return;
+  rm(walkLine); walkLine = null;
+  NAV = {legs, k: 0, g: buildGeo(legs[0].r), lastReroute: 0, checkAt: 0, dockMsg: ""};
+  drawLegs(legs);
+  $("walkBar").classList.remove("on");
+  $("navBar").classList.add("on");
+  document.body.classList.add("nav");
+  const sh = $("sheet"); sh.classList.remove("big"); sh.classList.add("small"); syncFab();
+  followMe = true; MAP.limit(false);
+  MAP.centerOn(S.me.lat, S.me.lon, 18);
+  navUpdate();
+}
+function stopNav(silent){
+  if (!NAV) return;
+  NAV = null;
+  navLines.forEach(rm); navLines = [];
+  $("navBar").classList.remove("on");
+  document.body.classList.remove("nav");
+  if (!silent && walkDest) $("walkBar").classList.add("on");
+}
+const legLabel = (l, i, n) => l.mode === "bike"
+  ? L(`第 ${i + 1}/${n} 段・🚲 騎到「${l.dest.name}」還車`, `Leg ${i + 1}/${n} · 🚲 ride to ${l.dest.name}`)
+  : (n > 1 ? L(`第 ${i + 1}/${n} 段・🚶 走到「${l.dest.name}」`, `Leg ${i + 1}/${n} · 🚶 walk to ${l.dest.name}`) : "");
+async function navUpdate(){
+  if (!NAV || !S.me) return;
+  const N = NAV, me = S.me, leg = N.legs[N.k], g = N.g, last = N.k === N.legs.length - 1;
+  const sp = snap(g, me.lat, me.lon);
+  const left = Math.max(0, g.total - sp.along);
+  const near = leg.mode === "bike" ? 25 : 20;
+  // 到達這一段的終點
+  if (distM(me.lat, me.lon, leg.dest.lat, leg.dest.lon) < near || (left < near && sp.d < 30)){
+    if (!last){
+      N.k++; N.g = buildGeo(N.legs[N.k].r); N.checkAt = 0; N.dockMsg = "";
+      navigator.vibrate?.([200, 100, 200]);
+      const nx = N.legs[N.k];
+      hint(nx.mode === "bike" ? L(`🚲 到借車站了！借好車就照橘色路線騎`, `🚲 At the bike station — rent a bike and follow the orange line`)
+        : leg.mode === "bike" ? L(`✅ 到還車站了，記得確認還車成功，再走到目的地`, `✅ At the return station — dock the bike, then walk on`) : "", 7000);
+      return navUpdate();
+    }
+    if (!N.arrived){ N.arrived = true; navigator.vibrate?.([200, 100, 200]); }
+    $("navArrow").textContent = "🏁";
+    $("navDist").textContent = L("已抵達", "Arrived");
+    $("navText").textContent = leg.dest.name;
+    $("navLeft").textContent = "";
+    return;
+  }
+  // 騎車段：離還車站 300 公尺內，每分鐘重新檢查一次空位
+  if (leg.mode === "bike" && leg.dest.id && distM(me.lat, me.lon, leg.dest.lat, leg.dest.lon) < 300 && Date.now() - N.checkAt > 60000){
+    N.checkAt = Date.now();
+    checkDock(N);
+  }
+  // 走偏了 → 重新規劃
+  if (sp.d > Math.max(35, (S.acc || 0) * 1.2)) g.off++; else g.off = 0;
+  if (g.off >= 2 && Date.now() - N.lastReroute > 15000){
+    N.lastReroute = Date.now(); g.off = 0;
+    $("navLeft").textContent = L("偏離路線，重新規劃中…", "Off route — rerouting…");
+    try {
+      const r = leg.mode === "bike" ? await bikeRoute(me, leg.dest) : await walkRoute(me, leg.dest);
+      if (NAV !== N) return;
+      leg.r = r; N.g = buildGeo(r); drawLegs(N.legs);
+      return navUpdate();
+    } catch (e) { /* 沒網路就繼續用舊路線 */ }
+  }
+  let i = g.stepEnd.findIndex(e => e > sp.along);
+  if (i < 0) i = g.stepEnd.length - 1;
+  const toTurn = g.stepEnd[i] - sp.along;
+  const next = g.r.steps?.[i + 1];
+  if (next){
+    $("navArrow").textContent = MAN[next.man] || "↑";
+    $("navDist").textContent = fmtM(toTurn);
+    $("navText").textContent = next.text || L("繼續前進", "Continue");
+  } else {
+    $("navArrow").textContent = leg.mode === "bike" ? "🚲" : (last ? "🏁" : "🚲");
+    $("navDist").textContent = fmtM(toTurn);
+    $("navText").textContent = leg.mode === "bike" ? L(`在「${leg.dest.name}」還車`, `Return the bike at ${leg.dest.name}`)
+      : last ? L(`抵達 ${leg.dest.name}`, `Arrive at ${leg.dest.name}`) : L(`在「${leg.dest.name}」借車`, `Rent a bike at ${leg.dest.name}`);
+  }
+  if (i !== g.lastStep && toTurn < 30){ g.lastStep = i; navigator.vibrate?.(150); }
+  // 剩下的時間：這一段剩下的 + 之後幾段
+  const legSec = g.r.sec * (left / (g.r.m || g.total || 1));
+  const restSec = N.legs.slice(N.k + 1).reduce((a, l) => a + l.r.sec, 0);
+  const restM = left + N.legs.slice(N.k + 1).reduce((a, l) => a + l.r.m, 0);
+  const minLeft = Math.max(1, Math.round((legSec + restSec) / 60));
+  const lbl = legLabel(leg, N.k, N.legs.length);
+  $("navLeft").innerHTML = g.off ? esc(L("⚠️ 好像走偏了，確認中…", "⚠️ You may be off route…"))
+    : esc(L(`剩 ${minLeft} 分鐘・${fmtM(restM)}`, `${minLeft} min · ${fmtM(restM)} left`)) + (lbl ? `<br>${esc(lbl)}` : "") + (N.dockMsg ? `<br>${N.dockMsg}` : "");
+}
+// 快到還車站時重新查空位；滿了就自動換到附近另一個有空位的站
+async function checkDock(N){
+  const leg = N.legs[N.k], fin = N.legs[N.legs.length - 1].dest;
+  try {
+    const av = await tdx(`/advanced/v2/Bike/Availability/NearBy?${near(leg.dest.lat, leg.dest.lon, 80)}`);
+    const a = av.find(x => x.StationUID === leg.dest.id);
+    if (NAV !== N) return;
+    const docks = a ? a.AvailableReturnBikes : null;
+    if (docks == null || docks > 0 && a.ServiceStatus === 1){
+      N.dockMsg = docks == null ? "" : `<span style="color:#4ade80">● ${esc(L(`還車站目前有 ${docks} 個空位`, `${docks} free docks at the return station`))}</span>`;
+      return navUpdate();
+    }
+    // 滿了：找附近其他有空位的站
+    const cands = (await bikeNearby(fin.lat, fin.lon)).filter(b => b.id !== leg.dest.id && b.service === 1 && b.docks > 0);
+    if (NAV !== N) return;
+    if (!cands.length){
+      N.dockMsg = `<span style="color:#f87171">● ${esc(L("還車站滿了，附近也找不到空位，請到現場再看看", "Return station full — no other free docks nearby"))}</span>`;
+      navigator.vibrate?.([300, 100, 300]); hint(L("⚠️ 還車站已經滿了", "⚠️ Return station is full"), 6000);
+      return navUpdate();
+    }
+    const me = S.me;
+    cands.sort((x, y) => (x.dist + 0.5 * distM(me.lat, me.lon, x.lat, x.lon)) - (y.dist + 0.5 * distM(me.lat, me.lon, y.lat, y.lon)));
+    const nb = cands[0];
+    const nd = {name: nb.name, lat: nb.lat, lon: nb.lon, id: nb.id};
+    const [r1, r2] = await Promise.all([bikeRoute(me, nd), walkRoute(nd, fin)]);
+    if (NAV !== N) return;
+    N.legs[N.k] = {mode: "bike", dest: nd, r: r1};
+    if (N.legs[N.k + 1]) N.legs[N.k + 1] = {mode: "walk", dest: fin, r: r2};
+    N.g = buildGeo(r1); N.checkAt = Date.now(); drawLegs(N.legs);
+    N.dockMsg = `<span style="color:#fbbf24">● ${esc(L(`原還車站已滿，改到「${nd.name}」（空位 ${nb.docks}）`, `Station full — switched to ${nd.name} (${nb.docks} docks)`))}</span>`;
+    navigator.vibrate?.([300, 100, 300]);
+    hint(L(`⚠️ 原還車站滿了，改去「${nd.name}」`, `⚠️ Station full — going to ${nd.name}`), 7000);
+    navUpdate();
+  } catch (e) { /* 查不到就下次再試 */ }
+}
+
+// ====== YouBike 路線規劃：走到有車的站 → 騎到目的地附近有空位的站 → 走過去 ======
+async function planBike(from, to){
+  const starts = (await bikeNearby(from.lat, from.lon)).filter(b => b.service === 1 && b.bikes > 0).sort((a, b) => a.dist - b.dist);
+  if (!starts.length) return {note: L(`你附近 ${NEAR_M} 公尺內沒有可借的 YouBike`, `No bikes available within ${NEAR_M} m of you`)};
+  const ends = (await bikeNearby(to.lat, to.lon)).filter(b => b.service === 1 && b.docks > 0).sort((a, b) => a.dist - b.dist);
+  if (!ends.length) return {note: L(`目的地 ${NEAR_M} 公尺內沒有可還車的 YouBike 站`, `No free docks within ${NEAR_M} m of the destination`)};
+  const start = starts.find(b => b.bikes >= 2) || starts[0];
+  const end = ends.find(b => b.docks >= 3) || ends[0];
+  const backup = ends.find(b => b.id !== end.id) || null;
+  if (start.id === end.id || distM(start.lat, start.lon, end.lat, end.lon) < 300)
+    return {note: L("目的地很近，用走的比較快", "Destination is close — walking is faster")};
+  const sd = {name: start.name, lat: start.lat, lon: start.lon, id: start.id};
+  const ed = {name: end.name, lat: end.lat, lon: end.lon, id: end.id};
+  const [w1, rd, w2] = await Promise.all([walkRoute(from, sd), bikeRoute(sd, ed), walkRoute(ed, to)]);
+  const legs = [{mode: "walk", dest: sd, r: w1}, {mode: "bike", dest: ed, r: rd}, {mode: "walk", dest: {name: to.name, lat: to.lat, lon: to.lon}, r: w2}];
+  return {start, end, backup, legs, sec: w1.sec + rd.sec + w2.sec + 120};   // 借、還車各抓 1 分鐘
+}
+function bikeCard(b){
+  if (!b) return "";
+  if (b.loading) return `<div class="empty"><span class="spin"></span> ${L("規劃 YouBike 路線中…", "Planning YouBike route…")}</div>`;
+  if (b.err) return `<div class="err">${esc(b.err)}</div>`;
+  if (b.note) return `<div class="empty">${esc(b.note)}</div>`;
+  const [w1, rd, w2] = b.legs.map(l => l.r);
+  const mn = s => Math.max(1, Math.round(s / 60));
+  const arr = new Date(Date.now() + b.sec * 1000).toLocaleTimeString("zh-TW", {hour: "2-digit", minute: "2-digit", hour12: false});
+  return `<div class="card">
+    <div class="row"><div><div class="num">${mn(b.sec)}<small style="font-size:15px;margin-left:3px">${L("分鐘", "min")}</small></div></div>
+      <div style="flex:1"></div><div style="text-align:right"><b style="font-size:18px">${arr}</b><div class="mute">${L("約抵達", "arrive")}</div></div></div>
+    <div class="bkt">
+      <div>🚶 ${L(`走 ${mn(w1.sec)} 分到「${esc(b.start.name)}」借車`, `Walk ${mn(w1.sec)} min to ${esc(b.start.name)}`)} <span class="tag ok">${L("可借", "bikes")} ${b.start.bikes}</span></div>
+      <div>🚲 ${L(`騎 ${mn(rd.sec)} 分（${fmtM(rd.m)}）到「${esc(b.end.name)}」還車`, `Ride ${mn(rd.sec)} min (${fmtM(rd.m)}) to ${esc(b.end.name)}`)} <span class="tag ok">${L("空位", "docks")} ${b.end.docks}</span>${rd.approx ? ` <span class="mute">${L("（時間估計）", "(est.)")}</span>` : ""}</div>
+      <div>🚶 ${L(`走 ${mn(w2.sec)} 分到目的地`, `Walk ${mn(w2.sec)} min to destination`)}</div>
+      ${b.backup ? `<div class="mute">${L(`備用還車站：「${esc(b.backup.name)}」（空位 ${b.backup.docks}）`, `Backup: ${esc(b.backup.name)} (${b.backup.docks} docks)`)}</div>` : ""}
+    </div>
+    <div class="acts"><button class="act main" id="bikeGo">▶ ${L("開始 YouBike 導航", "Start YouBike navigation")}</button><button class="act" id="bikeShow">${L("看路線", "Show route")}</button></div>
+    <div class="mute" style="font-size:12px;margin-top:6px">${L("騎到還車站 300 公尺內會重新檢查空位，滿了會自動換站。", "Docks are rechecked within 300 m of the return station; full stations are swapped automatically.")}</div>
+  </div>`;
+}
+
+// ====== 網頁開著時螢幕不自動關（iPhone 需 iOS 16.4 以上）======
+let wakeLock = null;
+async function keepAwake(){
+  if (document.hidden || !navigator.wakeLock || (wakeLock && !wakeLock.released)) return;
+  try { wakeLock = await navigator.wakeLock.request("screen"); } catch (e) { /* 有些瀏覽器要先點一下畫面 */ }
+}
+keepAwake();
+document.addEventListener("visibilitychange", keepAwake);
+document.addEventListener("click", keepAwake, {capture: true});
+document.addEventListener("touchend", keepAwake, {capture: true});
 
 // ====== 指南針箭頭 ======
 let cmpTarget = null, cmpAngle = 0, orientOn = false;
@@ -1455,7 +1724,7 @@ function onOrient(e){
   if (h == null) return;
   h = (h + (screen.orientation?.angle || 0)) % 360;
   S.heading = h; updateCompass();
-  if (MAP.kind === "google" && MAP.type === "3d" && KEYS.mapId && Date.now() - (onOrient.t || 0) > 500){ onOrient.t = Date.now(); MAP.g.setHeading(h); }
+  if (MAP.kind === "google" && (MAP.type === "3d" || NAV) && KEYS.mapId && Date.now() - (onOrient.t || 0) > 500){ onOrient.t = Date.now(); MAP.g.setHeading(h); }
 }
 async function startOrientation(){
   if (orientOn) return;
@@ -1546,6 +1815,8 @@ render();
   document.querySelector('.tabs [data-t="near"]').textContent = L("附近", "Nearby");
   document.querySelector('.tabs [data-t="route"]').textContent = L("路線", "Routes");
   $("langBtn").textContent = EN ? "中" : "EN";
+  $("walkStart").textContent = "▶ " + L("開始導航", "Start");
+  $("navEnd").textContent = L("結束", "End");
   const mt = {road: L("一般", "Map"), sat: L("衛星", "Sat"), "3d": "3D"};
   document.querySelectorAll("#mtype button").forEach(b => b.textContent = mt[b.dataset.mt]);
   $("langBtn").onclick = () => { LS.set("lang", EN ? "zh" : "en"); location.reload(); };
