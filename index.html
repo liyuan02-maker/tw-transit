@@ -172,7 +172,7 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 <button class="fab" id="locBtn" title="回到我的位置">◎</button>
 <button class="fab" id="langBtn" title="中文 / English">EN</button>
 <div id="mtype">
-  <button data-mt="road" class="on">一般</button><button data-mt="sat">衛星</button><button data-mt="3d">3D</button><button data-mt="sv">街景</button>
+  <button data-mt="road" class="on">一般</button><button data-mt="sat">衛星</button><button data-mt="3d">3D</button>
 </div>
 <div id="compass">
   <button id="cmpClose" aria-label="close">×</button>
@@ -720,7 +720,7 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "w9";
+const VERSION = "w10";
 function showMapErr(msg){
   const box = $("mapErr");
   box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>${L("地圖載入有問題", "Map problem")}</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
@@ -848,6 +848,22 @@ const MAP = {
   line(path, color){ return this.add({type: "line", path, color}); },
   circle(lat, lng, radius){ return this.add({type: "circle", lat, lng, radius}); },
 
+  // 地圖被上方搜尋列、下方清單擋住一部分；算出露出來那一塊的中心，比整個地圖中心高多少像素
+  visibleOffset(){
+    const H = window.innerHeight;
+    if (matchMedia("(min-width: 820px)").matches) return 0;   // 寬螢幕：地圖在右邊，沒有被擋
+    const top = document.querySelector(".top").getBoundingClientRect().bottom;
+    const bottom = $("sheet").getBoundingClientRect().top;
+    return H / 2 - (top + bottom) / 2;
+  },
+  // 把 (lat,lng) 放在露出來那一塊的正中央
+  centerOn(lat, lng, zoom){
+    if (!this.kind) return;
+    const z = zoom || this.zoom();
+    const mPerPx = 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, z);
+    const dLat = this.visibleOffset() * mPerPx / 111320;
+    this.panTo(lat - dLat, lng, zoom);
+  },
   panTo(lat, lng, zoom){
     if (this.kind === "google"){ this.g.panTo({lat, lng}); if (zoom) this.g.setZoom(zoom); }
     else if (this.kind === "leaflet"){ zoom ? this.l.setView([lat, lng], zoom) : this.l.panTo([lat, lng]); }
@@ -897,7 +913,6 @@ const MAP = {
   setType(t){
     if (this.kind !== "google"){ return; }
     const g = this.g;
-    if (t === "sv"){ this.openStreetView(); return; }
     this.type = t;
     document.querySelectorAll("#mtype button").forEach(b => b.classList.toggle("on", b.dataset.mt === t));
     if (t === "road"){ g.setMapTypeId("roadmap"); g.setTilt(0); g.setHeading(0); }
@@ -908,19 +923,6 @@ const MAP = {
       else { g.setMapTypeId("satellite"); g.setTilt(45); hint(L("還沒設定地圖 ID，先用衛星斜視；設定後會有立體建築", "No Map ID yet — showing tilted satellite instead"), 4000); }
       if (S.heading != null) g.setHeading(S.heading);
     }
-  },
-  openStreetView(){
-    const at = S.me || {lat: 25.0478, lon: 121.517};
-    new google.maps.StreetViewService().getPanorama({location: {lat: at.lat, lng: at.lon}, radius: 120, source: google.maps.StreetViewSource.OUTDOOR}, (data, status) => {
-      if (status !== "OK"){ hint(L("這附近沒有街景", "No Street View near here"), 3000); return; }
-      const pano = this.g.getStreetView();
-      pano.setOptions({position: data.location.latLng, pov: {heading: S.heading ?? 0, pitch: 0}, visible: true,
-        addressControl: false, fullscreenControl: false, enableCloseButton: true, motionTracking: true, motionTrackingControl: true});
-      document.querySelectorAll("#mtype button").forEach(b => b.classList.toggle("on", b.dataset.mt === "sv"));
-      const l = pano.addListener("visible_changed", () => {
-        if (!pano.getVisible()){ google.maps.event.removeListener(l); document.querySelectorAll("#mtype button").forEach(b => b.classList.toggle("on", b.dataset.mt === this.type)); }
-      });
-    });
   },
 };
 function notice(msg){ showMapErr(msg); clearTimeout(notice.t); notice.t = setTimeout(() => $("mapErr").style.display = "none", 9000); }
@@ -968,7 +970,7 @@ function el(html){ const d = document.createElement("div"); d.innerHTML = html; 
 let watchId = null, accCircle = null, lastNearAt = 0, followMe = true;
 function locate(){
   followMe = true;
-  if (S.me && S.located) MAP.panTo(S.me.lat, S.me.lon, 16);
+  if (S.me && S.located) MAP.centerOn(S.me.lat, S.me.lon, 16);
   if (!navigator.geolocation){ useFallback(L("此瀏覽器不支援定位", "This browser doesn't support location")); return; }
   if (watchId != null) return;   // 已經在追蹤了
   let first = true;
@@ -979,10 +981,10 @@ function locate(){
     S.located = true; S.locMsg = null;
     placeMe();
     S.fixAt = new Date();
-    if (first){ first = false; MAP.panTo(S.me.lat, S.me.lon, 16); if (S.tab === "near") MAP.limit(true); loadNear(S.me); lastNearAt = Date.now(); updateCompass(); return; }
+    if (first){ first = false; MAP.centerOn(S.me.lat, S.me.lon, 16); setTimeout(() => followMe && MAP.centerOn(S.me.lat, S.me.lon), 800); if (S.tab === "near") MAP.limit(true); loadNear(S.me); lastNearAt = Date.now(); updateCompass(); return; }
     MAP.limitFollow();
     updateCompass();
-    if (followMe) MAP.panTo(S.me.lat, S.me.lon);
+    if (followMe) MAP.centerOn(S.me.lat, S.me.lon);
     // 走離上次查詢的地方超過 100 公尺，自動更新附近（最快 30 秒一次）
     if (S.area && distM(S.me.lat, S.me.lon, S.area.lat, S.area.lon) > 100 && Date.now() - lastNearAt > 30000 && Date.now() > tdxCooldown){
       lastNearAt = Date.now(); loadNear(S.me, true);
@@ -1008,7 +1010,7 @@ const accText = () => {
 };
 function useFallback(msg){
   S.me = {lat: 25.0478, lon: 121.5170}; S.located = false; S.locMsg = msg + L("，先以台北車站為起點。", " — using Taipei Main Station as the start.");
-  placeMe(); MAP.panTo(S.me.lat, S.me.lon);
+  placeMe(); MAP.centerOn(S.me.lat, S.me.lon);
   loadNear(S.me);
 }
 function placeMe(){
@@ -1272,6 +1274,7 @@ function syncFab(){
   document.documentElement.style.setProperty("--sheet-h", h);
   $("locBtn").style.display = s.classList.contains("big") ? "none" : "block";
   $("langBtn").style.display = s.classList.contains("big") ? "none" : "block";
+  if (followMe && S.me && S.located && S.tab === "near") setTimeout(() => MAP.centerOn(S.me.lat, S.me.lon), 300);   // 等抽屜動畫結束
 }
 $("grab").onclick = () => {
   const s = $("sheet");
@@ -1282,7 +1285,7 @@ $("grab").onclick = () => {
 };
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
   S.tab = b.dataset.t; openSheet($("sheet").classList.contains("big")); render();
-  if (S.tab === "near"){ MAP.limit(true); if (S.me) MAP.panTo(S.me.lat, S.me.lon, 16); } else MAP.limit(false);
+  if (S.tab === "near"){ MAP.limit(true); if (S.me) MAP.centerOn(S.me.lat, S.me.lon, 16); } else MAP.limit(false);
 });
 document.querySelectorAll("#mtype button").forEach(b => b.onclick = () => MAP.setType(b.dataset.mt));
 // ====== 搜尋建議 ======
@@ -1470,7 +1473,7 @@ render();
   document.querySelector('.tabs [data-t="near"]').textContent = L("附近", "Nearby");
   document.querySelector('.tabs [data-t="route"]').textContent = L("路線", "Routes");
   $("langBtn").textContent = EN ? "中" : "EN";
-  const mt = {road: L("一般", "Map"), sat: L("衛星", "Sat"), "3d": "3D", sv: L("街景", "Street")};
+  const mt = {road: L("一般", "Map"), sat: L("衛星", "Sat"), "3d": "3D"};
   document.querySelectorAll("#mtype button").forEach(b => b.textContent = mt[b.dataset.mt]);
   $("langBtn").onclick = () => { LS.set("lang", EN ? "zh" : "en"); location.reload(); };
 })();

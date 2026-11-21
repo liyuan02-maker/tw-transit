@@ -24,35 +24,33 @@ const json = (obj, status, origin, extra = {}) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", ...cors(origin), ...extra } });
 
 // TDX 登入憑證：存在記憶體 + KV（TOKEN_KV），一天只需要登入一次
-let token = null, tokenExp = 0, inflight = null;
+// TDX 登入憑證：存在記憶體 + KV（TOKEN_KV），一天只需要登入一次
+// 注意：Cloudflare 不允許不同請求共用同一個 Promise，所以這裡不共用「登入中」的等待
+let token = null, tokenExp = 0;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function getToken(env, force) {
-  if (token && Date.now() < tokenExp) return token;
-  if (inflight) return inflight;            // 同時多個請求只登入一次
-  inflight = (async () => {
-    if (env.TOKEN_KV && !force) {
-      const j = await env.TOKEN_KV.get("tdx", "json");
-      if (j && j.exp > Date.now() + 60000) { token = j.t; tokenExp = j.exp; return token; }
-    }
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const r = await fetch("https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token", {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ grant_type: "client_credentials", client_id: env.TDX_ID, client_secret: env.TDX_SECRET }),
-      });
-      if (env.TOKEN_KV) await env.TOKEN_KV.put("last", JSON.stringify({ at: new Date().toISOString(), status: r.status }));
-      if (r.status === 429) { await sleep(2000 * (attempt + 1)); continue; }
-      if (!r.ok) throw new Error(`TDX 登入失敗 (${r.status})，請檢查 TDX 金鑰`);
-      const j = await r.json();
-      token = j.access_token;
-      tokenExp = Date.now() + (j.expires_in - 600) * 1000;
-      if (env.TOKEN_KV) await env.TOKEN_KV.put("tdx", JSON.stringify({ t: token, exp: tokenExp }), { expirationTtl: Math.max(60, j.expires_in - 600) });
-      return token;
-    }
-    throw new Error("伺服器正在向 TDX 取得登入憑證，通常幾分鐘內會好，請稍後再試");
-  })().finally(() => { inflight = null; });
-  return inflight;
+  if (!force && token && Date.now() < tokenExp) return token;
+  if (env.TOKEN_KV && !force) {
+    const j = await env.TOKEN_KV.get("tdx", "json");
+    if (j && j.exp > Date.now() + 60000) { token = j.t; tokenExp = j.exp; return token; }
+  }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = await fetch("https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ grant_type: "client_credentials", client_id: env.TDX_ID, client_secret: env.TDX_SECRET }),
+    });
+    if (env.TOKEN_KV) await env.TOKEN_KV.put("last", JSON.stringify({ at: new Date().toISOString(), status: r.status }));
+    if (r.status === 429) { await sleep(2000 * (attempt + 1)); continue; }
+    if (!r.ok) throw new Error(`TDX 登入失敗 (${r.status})，請檢查 TDX 金鑰`);
+    const j = await r.json();
+    token = j.access_token;
+    tokenExp = Date.now() + (j.expires_in - 600) * 1000;
+    if (env.TOKEN_KV) await env.TOKEN_KV.put("tdx", JSON.stringify({ t: token, exp: tokenExp }), { expirationTtl: Math.max(60, j.expires_in - 600) });
+    return token;
+  }
+  throw new Error("伺服器正在向 TDX 取得登入憑證，通常幾分鐘內會好，請稍後再試");
 }
 
 // 排程：每 5 分鐘檢查一次，憑證剩不到 6 小時就重新登入
