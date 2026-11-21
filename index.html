@@ -9,9 +9,9 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 :root{
-  --ink:#1c2230; --mute:#6b7280; --line:#e6e1d6; --card:#fff; --bg:#f6f4ef;
+  --ink:#000; --mute:#2f3640; --line:#a9a294; --card:#fff; --bg:#ece8df;
   --bike:#f2a900; --bus:#0e9f8e; --mrt:#0070bd; --tra:#1f3a8a; --hsr:#e8590c; --walk:#2f855a;
-  --ok:#16a34a; --warn:#f59e0b; --bad:#dc2626;
+  --ok:#0f7a33; --warn:#b45309; --bad:#c00000;
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;overflow:hidden}
@@ -30,6 +30,7 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 .sugg .t small{display:block;color:var(--mute);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sugg .del{color:var(--mute);font-size:18px;padding:0 4px}
 .sugg mark{background:none;color:var(--mrt);font-weight:700}
+.search input::placeholder{color:#4b5563}
 .search input{flex:1;min-width:0;border:0;font:inherit;font-size:16px;padding:10px 10px;outline:none;background:transparent}
 .search button{border:0;border-radius:12px;font:inherit;font-weight:700;cursor:pointer}
 #micBtn{background:#f1efe9;color:var(--ink);width:44px;display:grid;place-items:center;flex:0 0 auto}
@@ -54,23 +55,28 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 .tabs button.on{background:var(--ink);border-color:var(--ink);color:#fff}
 .body{flex:1;overflow-y:auto;padding:0 14px 20px;-webkit-overflow-scrolling:touch}
 .sec{margin:6px 0 16px}
-.sec h3{display:flex;align-items:center;gap:8px;font-size:15px;margin:0 0 8px}
+.sec h3{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:800;margin:0 0 7px}
 .sec h3 i{width:10px;height:10px;border-radius:3px;display:inline-block}
 .sec h3 small{font-weight:400;color:var(--mute);font-size:12px;margin-left:auto}
-.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:8px}
+.card{background:var(--card);border:1.5px solid var(--line);border-radius:14px;padding:10px 12px;margin-bottom:7px}
 .card.tap{cursor:pointer}
 .card.sel{border-color:var(--ink);box-shadow:0 0 0 2px var(--ink) inset}
 .row{display:flex;align-items:center;gap:10px}
-.num{font-size:20px;font-weight:900;font-variant-numeric:tabular-nums}
-.mute{color:var(--mute);font-size:13px}
+.num{font-size:28px;font-weight:900;line-height:1.05;font-variant-numeric:tabular-nums}
+.mute{color:var(--mute);font-size:13px;font-weight:500}
 .pill{display:inline-flex;align-items:center;gap:3px;border-radius:8px;padding:2px 8px;font-size:13px;font-weight:700;color:#fff;white-space:nowrap}
 .steps{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:8px;font-size:13px}
 .steps .w{color:var(--mute)}
-.eta{display:grid;grid-template-columns:1fr auto;gap:4px 10px;font-size:14px;margin-top:8px}
+.eta{display:grid;grid-template-columns:1fr auto;gap:5px 10px;font-size:15px;margin-top:6px;align-items:center}
 .eta .rno{font-weight:600;margin-right:6px}
-.eta .rends{color:var(--mute);font-size:12.5px}
+.eta .rends{color:var(--mute);font-size:12.5px;font-weight:500}
 .eta b{font-variant-numeric:tabular-nums}
+.eta .t{font-size:20px;font-weight:900;text-align:right;white-space:nowrap}
+.eta .t small{font-size:13px;font-weight:700}
+.eta .t.st{font-size:13px;font-weight:700;color:var(--mute)}
 .soon{color:var(--bad)}
+.tag{display:inline-block;border-radius:6px;padding:1px 7px;font-size:12px;font-weight:800;color:#fff;margin-left:6px;vertical-align:2px}
+.tag.bad{background:var(--bad)}.tag.warn{background:var(--warn)}.tag.ok{background:var(--ok)}
 .trains{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
 .trains td{padding:6px 0;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
 .trains td:last-child{text-align:right}
@@ -81,10 +87,11 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 .notice{background:#fff7e6;border:1px solid #f5d9a8;border-radius:12px;padding:10px 12px;font-size:13px;margin-bottom:10px}
 
 /* 地圖上的 YouBike 標記 */
-.bk{display:flex;align-items:center;gap:4px;background:#fff;border:2px solid var(--c);border-radius:999px;padding:2px 7px 2px 4px;font:700 12px/1.2 system-ui,sans-serif;color:var(--ink);box-shadow:0 2px 6px rgba(0,0,0,.25);white-space:nowrap;cursor:pointer}
+.bk{display:flex;align-items:center;gap:4px;background:#fff;border:2.5px solid var(--c);border-radius:999px;padding:2px 8px 2px 4px;font:800 14px/1.2 system-ui,sans-serif;color:#000;box-shadow:0 2px 6px rgba(0,0,0,.25);white-space:nowrap;cursor:pointer}
 .bk .ico{margin-left:-2px}
 .bk .ic{width:18px;height:18px;border-radius:50%;background:var(--c);color:#fff;display:grid;place-items:center;font-size:11px}
-.bk .sp{color:var(--mute);font-weight:500}
+.bk .sp{color:#333!important;font-weight:700!important}
+.sp{color:var(--mute);font-weight:500}
 .ico{display:inline-grid;place-items:center;border-radius:50%;flex:0 0 auto;vertical-align:middle}
 .mk .ico{border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.35)}
 .sec h3 .ico{margin-right:2px}
@@ -686,7 +693,7 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "w6";
+const VERSION = "w8";
 function showMapErr(msg){
   const box = $("mapErr");
   box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>${L("地圖載入有問題", "Map problem")}</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
@@ -727,6 +734,7 @@ const MAP = {
           disableDefaultUI: true, clickableIcons: false, gestureHandling: "greedy"});
         this.g.addListener("tilesloaded", () => { ok = true; });
         this.g.addListener("idle", () => this.moveCb && this.moveCb());
+        this.g.addListener("dragstart", () => { followMe = false; });
         this.defineOverlay();
         this.redraw();
         if (!this.done){ this.done = true; locate(); }
@@ -743,10 +751,11 @@ const MAP = {
     if (!window.L){ notice(L("下載不到地圖程式，請確認網路後重新整理。", "Couldn't load the map — check your connection and reload.")); return; }
     this.kind = "leaflet"; this.g = null;
     const el = this.freshDiv();
-    this.l = L.map(el, {zoomControl: false}).setView([25.0478, 121.5170], 16);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19,
+    this.l = window.L.map(el, {zoomControl: false}).setView([25.0478, 121.5170], 16);
+    window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19,
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(this.l);
     this.l.on("moveend", () => this.moveCb && this.moveCb());
+    this.l.on("dragstart", () => { followMe = false; });
     this.redraw();
     if (S.me) this.panTo(S.me.lat, S.me.lon);
     if (!this.done){ this.done = true; locate(); }
@@ -778,17 +787,24 @@ const MAP = {
   build(o){
     if (o.type === "marker"){
       if (this.kind === "google") { const v = new this.HtmlOv(o); v.setMap(this.g); return () => v.setMap(null); }
-      const icon = L.divIcon({className: "", iconSize: null,
+      const icon = window.L.divIcon({className: "", iconSize: null,
         html: `<div style="transform:translate(-50%,${o.bottom ? "-100%" : "-50%"})" title="${esc(o.title || "")}">${o.html}</div>`});
-      const m = L.marker([o.lat, o.lng], {icon, zIndexOffset: o.z || 0, keyboard: false}).addTo(this.l);
+      const m = window.L.marker([o.lat, o.lng], {icon, zIndexOffset: o.z || 0, keyboard: false}).addTo(this.l);
       m.on("click", () => o.click && o.click());
       return () => m.remove();
+    } else if (o.type === "circle") {
+      if (this.kind === "google") {
+        const c = new google.maps.Circle({map: this.g, center: {lat: o.lat, lng: o.lng}, radius: o.radius, strokeColor: "#2563eb", strokeOpacity: .5, strokeWeight: 1, fillColor: "#2563eb", fillOpacity: .12, clickable: false});
+        return () => c.setMap(null);
+      }
+      const c = window.L.circle([o.lat, o.lng], {radius: o.radius, color: "#2563eb", opacity: .5, weight: 1, fillColor: "#2563eb", fillOpacity: .12, interactive: false}).addTo(this.l);
+      return () => c.remove();
     } else {
       if (this.kind === "google") {
         const pl = new google.maps.Polyline({map: this.g, path: o.path.map(([a, b]) => ({lat: a, lng: b})), strokeColor: o.color, strokeWeight: 6, strokeOpacity: .9});
         return () => pl.setMap(null);
       }
-      const pl = L.polyline(o.path, {color: o.color, weight: 6, opacity: .9}).addTo(this.l);
+      const pl = window.L.polyline(o.path, {color: o.color, weight: 6, opacity: .9}).addTo(this.l);
       return () => pl.remove();
     }
   },
@@ -800,6 +816,7 @@ const MAP = {
 
   marker(lat, lng, html, title, z, bottom){ return this.add({type: "marker", lat, lng, html, title, z, bottom}); },
   line(path, color){ return this.add({type: "line", path, color}); },
+  circle(lat, lng, radius){ return this.add({type: "circle", lat, lng, radius}); },
 
   panTo(lat, lng, zoom){
     if (this.kind === "google"){ this.g.panTo({lat, lng}); if (zoom) this.g.setZoom(zoom); }
@@ -843,7 +860,7 @@ const ICON = {
   tra: () => `<div class="mk">${badge("tra", 28)}</div>`,
   thsr: () => `<div class="mk">${badge("thsr", 28)}</div>`,
   dest: () => `<svg width="30" height="40" viewBox="0 0 30 40" style="display:block"><path d="M15 1C7 1 1 7 1 15c0 10 14 24 14 24s14-14 14-24C29 7 23 1 15 1z" fill="#dc2626" stroke="#fff" stroke-width="2"/><circle cx="15" cy="15" r="5" fill="#fff"/></svg>`,
-  bike: (b, color) => `<div class="bk" style="--c:${color}">${badge("bike", 20)}${b.bikes ?? "?"}<span class="sp">/ ${L("空", "")}${b.docks ?? "?"}</span></div>`,
+  bike: (b, color) => `<div class="bk" style="--c:${color}">${badge("bike", 20)}${b.service !== 1 ? L("暫停", "Closed") : b.bikes === 0 ? `<span style="color:#c00000">${L("無車", "None")}</span>` : (b.bikes ?? "?")}<span class="sp">/ ${L("空", "")}${b.docks ?? "?"}</span></div>`,
 };
 // Google 路線線條解碼
 function decodePolyline(str){
@@ -862,23 +879,49 @@ function decodePolyline(str){
 const pad = f => ({paddingTopLeft: [30, 90], paddingBottomRight: [30, window.innerHeight * f]});
 function el(html){ const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; }
 
+// 定位：持續追蹤、最高精準度（不用舊的位置）
+let watchId = null, accCircle = null, lastNearAt = 0, followMe = true;
 function locate(){
+  followMe = true;
+  if (S.me && S.located) MAP.panTo(S.me.lat, S.me.lon, 17);
   if (!navigator.geolocation){ useFallback(L("此瀏覽器不支援定位", "This browser doesn't support location")); return; }
-  navigator.geolocation.getCurrentPosition(p => {
-    S.me = {lat: p.coords.latitude, lon: p.coords.longitude};
-    S.located = true;
+  if (watchId != null) return;   // 已經在追蹤了
+  let first = true;
+  watchId = navigator.geolocation.watchPosition(p => {
+    const c = p.coords;
+    S.me = {lat: c.latitude, lon: c.longitude};
+    S.acc = Math.round(c.accuracy);
+    S.located = true; S.locMsg = null;
     placeMe();
-    MAP.panTo(S.me.lat, S.me.lon, 16);
-    loadNear(S.me);
-  }, e => useFallback(e.code === 1 ? L("你沒有允許定位", "Location permission denied") : L("無法取得定位", "Couldn't get your location")), {enableHighAccuracy: true, timeout: 10000, maximumAge: 30000});
+    if (first){ first = false; MAP.panTo(S.me.lat, S.me.lon, 17); loadNear(S.me); lastNearAt = Date.now(); return; }
+    if (followMe) MAP.panTo(S.me.lat, S.me.lon);
+    // 走離上次查詢的地方超過 100 公尺，自動更新附近（最快 30 秒一次）
+    if (S.area && distM(S.me.lat, S.me.lon, S.area.lat, S.area.lon) > 100 && Date.now() - lastNearAt > 30000 && Date.now() > tdxCooldown){
+      lastNearAt = Date.now(); loadNear(S.me, true);
+    }
+    if (S.tab === "near") updateAcc();
+  }, e => {
+    if (!first) return;   // 追蹤途中短暫失敗就忽略
+    watchId != null && navigator.geolocation.clearWatch(watchId); watchId = null;
+    useFallback(e.code === 1 ? L("你沒有允許定位", "Location permission denied") : L("無法取得定位", "Couldn't get your location"));
+  }, {enableHighAccuracy: true, timeout: 20000, maximumAge: 0});
 }
+function updateAcc(){
+  const el = document.getElementById("accLine");
+  if (el && S.acc != null) el.innerHTML = accText();
+}
+const accText = () => {
+  const a = S.acc, q = a <= 15 ? ["#16a34a", L("很準", "good")] : a <= 50 ? ["#f59e0b", L("普通", "fair")] : ["#dc2626", L("不準", "poor")];
+  return `<span style="color:${q[0]}">●</span> ${L("定位誤差約", "Location accuracy ±")}${L(" ±", "")}${a} m（${q[1]}）`;
+};
 function useFallback(msg){
   S.me = {lat: 25.0478, lon: 121.5170}; S.located = false; S.locMsg = msg + L("，先以台北車站為起點。", " — using Taipei Main Station as the start.");
   placeMe(); MAP.panTo(S.me.lat, S.me.lon);
   loadNear(S.me);
 }
 function placeMe(){
-  rm(meMarker);
+  rm(meMarker); rm(accCircle); accCircle = null;
+  if (S.located && S.acc) accCircle = MAP.circle(S.me.lat, S.me.lon, S.acc);
   meMarker = mk({lat: S.me.lat, lng: S.me.lon}, ICON.me(), L("我的位置", "My location"), 999);
 }
 
@@ -906,10 +949,18 @@ async function loadNear(pt, quiet){
 }
 
 function bikeColor(b){
-  if (b.service !== 1) return "#9ca3af";
-  if (!b.bikes) return "#dc2626";
-  if (b.bikes < 3) return "#f59e0b";
-  return "#16a34a";
+  if (b.service !== 1) return "#6b7280";
+  if (!b.bikes) return "#c00000";
+  if (b.bikes < 3) return "#b45309";
+  return "#0f7a33";
+}
+// YouBike 狀態文字（不只靠顏色）
+function bikeTag(b){
+  if (b.service !== 1) return `<span class="tag" style="background:#4b5563">${L("暫停營運", "Closed")}</span>`;
+  if (b.bikes === 0) return `<span class="tag bad">${L("無車", "No bikes")}</span>`;
+  if (b.docks === 0) return `<span class="tag bad">${L("滿位・無法還車", "Full · can't return")}</span>`;
+  if (b.bikes != null && b.bikes < 3) return `<span class="tag warn">${L("車少", "Few bikes")}</span>`;
+  return "";
 }
 
 const showKind = k => S.nearFilter === "all" || S.nearFilter === k;
@@ -1030,6 +1081,7 @@ function render(){
   let h = "";
   if (S.tab === "near"){
     if (S.locMsg && !S.located) h += `<div class="notice">📍 ${esc(S.locMsg)}</div>`;
+    if (S.located && S.acc != null) h += `<div class="mute" id="accLine" style="font-size:12px;margin:-2px 0 8px">${accText()}</div>`;
     if (S.nearErr) h += `<div class="err">${esc(S.nearErr)}</div>`;
     // 篩選按鈕
     const cnt = {}; for (const k of ["bike", "metro", "bus"]) if (!S.pending.has(k)) cnt[k] = { bike: S.bikes, metro: S.metros, bus: S.buses }[k].length;
@@ -1040,9 +1092,9 @@ function render(){
     h += `<div class="sec"><h3>${badge("bike")}${L(`附近 ${NEAR_M} 公尺的 YouBike`, `YouBike within ${NEAR_M} m`)}<small>${L("可借 / 可還", "Bikes / Docks")}</small></h3>`;
     h += S.bikes.length ? S.bikes.map(b => `<div class="card ${S.focusBike === b.id ? "sel" : ""}" data-bike="${esc(b.id)}">
         <div class="row">
-          <div style="flex:1"><b>${esc(b.name)}</b><div class="mute">🚶 ${b.walk} ${L("分", "min")}（${b.dist} m）${b.service !== 1 ? L(" · 暫停營運", " · Out of service") : ""}</div></div>
+          <div style="flex:1;min-width:0"><b>${esc(b.name)}</b>${bikeTag(b)}<div class="mute">🚶 ${b.walk} ${L("分", "min")}（${b.dist} m）</div></div>
           <div style="text-align:center"><div class="num" style="color:${bikeColor(b)}">${b.bikes ?? "?"}</div><div class="mute">${L("可借", "Bikes")}</div></div>
-          <div style="text-align:center"><div class="num">${b.docks ?? "?"}</div><div class="mute">${L("空位", "Docks")}</div></div>
+          <div style="text-align:center"><div class="num" style="color:${b.docks === 0 ? "#c00000" : "#000"}">${b.docks ?? "?"}</div><div class="mute">${L("空位", "Docks")}</div></div>
         </div></div>`).join("") : (S.pending.has("bike") ? `<div class="empty"><span class="spin"></span> ${L("讀取中…", "Loading…")}</div>` : `<div class="empty">${L(`附近 ${NEAR_M} 公尺內沒有 YouBike 站`, `No YouBike stations within ${NEAR_M} m`)}</div>`);
     h += `</div>`;
     }
@@ -1063,7 +1115,9 @@ function render(){
         <div class="row"><b style="flex:1">${esc(s.name)}</b><span class="mute">🚶 ${s.walk} ${L("分", "min")}（${s.dist} m）</span></div>
         ${s.arrivals.length ? `<div class="eta">${s.arrivals.slice(0, 8).map(a => `
           <span><b class="rno">${esc(a.route)}</b>${a.ends ? `<span class="rends">${esc(a.ends[0])} → ${esc(a.ends[1])}</span>` : (s.arrivals.filter(x => x.route === a.route).length > 1 ? `<span class="mute">（${a.dir === 1 ? L("返程", "return") : L("去程", "outbound")}）</span>` : "")}</span>
-          <b class="${a.min != null && a.min <= 3 ? "soon" : ""}">${a.min != null ? (a.min <= 1 ? L("進站中", "Arriving") : a.min + L(" 分", " min")) : `<span class="mute">${esc(a.status)}</span>`}</b>`).join("")}</div>`
+          ${a.min != null
+            ? `<span class="t ${a.min <= 3 ? "soon" : ""}">${a.min <= 1 ? L("進站中", "Arriving") : `${a.min}<small>${L(" 分", " min")}</small>${a.min <= 3 ? `<span class="tag bad">${L("快到", "Soon")}</span>` : ""}`}</span>`
+            : `<span class="t st">${esc(a.status)}</span>`}`).join("")}</div>`
           : `<div class="empty">${L("目前沒有到站資料", "No arrival info right now")}</div>`}
       </div>`).join("") : (S.pending.has("bus") ? `<div class="empty"><span class="spin"></span> ${L("讀取中…", "Loading…")}</div>` : `<div class="empty">${L(`附近 ${NEAR_M} 公尺內沒有公車站`, `No bus stops within ${NEAR_M} m`)}</div>`);
     h += `</div>`;
