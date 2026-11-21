@@ -135,6 +135,14 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
 .act{display:inline-flex;align-items:center;border:1.5px solid #000;background:#fff;border-radius:8px;padding:4px 10px;font:inherit;font-size:13px;font-weight:800;color:#000;text-decoration:none;cursor:pointer;line-height:1.3}
 .act:active{background:#eee}
+.act.main{background:#000;color:#fff}
+.act.sub{border-color:#6b7280;color:#2f3640;font-weight:700}
+#walkBar{position:fixed;left:12px;right:74px;top:calc(env(safe-area-inset-top) + 76px);z-index:7;display:none;align-items:center;gap:10px;background:#fff;border:2.5px solid #000;border-radius:16px;padding:10px 12px;box-shadow:0 4px 18px rgba(0,0,0,.3)}
+#walkBar.on{display:flex}
+#walkBar .wt{font-size:28px;font-weight:900;line-height:1.1;white-space:nowrap}
+#walkBar .wn{font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#walkBar .wx{border:0;background:none;font-size:26px;font-weight:700;cursor:pointer;color:#000;padding:0 4px}
+@media (min-width: 820px){ #walkBar{left:calc(var(--panel) + 16px);right:80px;top:16px;max-width:460px} }
 #mtype{position:fixed;right:12px;top:calc(env(safe-area-inset-top) + 76px);z-index:5;display:flex;flex-direction:column;background:#fff;border:2px solid #000;border-radius:12px;overflow:hidden;box-shadow:0 3px 12px rgba(0,0,0,.25)}
 #mtype button{border:0;border-top:1.5px solid #000;background:#fff;color:#000;font:800 13px/1 system-ui,"Noto Sans TC",sans-serif;padding:9px 8px;min-width:46px;cursor:pointer}
 #mtype button:first-child{border-top:0}
@@ -173,6 +181,11 @@ html,body{margin:0;height:100%;font-family:"Noto Sans TC","PingFang TC","Microso
 <button class="fab" id="langBtn" title="中文 / English">EN</button>
 <div id="mtype">
   <button data-mt="road" class="on">一般</button><button data-mt="sat">衛星</button><button data-mt="3d">3D</button>
+</div>
+<div id="walkBar">
+  <div style="flex:1;min-width:0"><div class="wn" id="walkName"></div><div class="wt" id="walkTime"></div><div class="mute" id="walkNote"></div></div>
+  <a class="act sub" id="walkG" target="_blank" rel="noopener">Google ↗</a>
+  <button class="wx" id="walkClose" aria-label="close">×</button>
 </div>
 <div id="compass">
   <button id="cmpClose" aria-label="close">×</button>
@@ -720,7 +733,7 @@ async function api(path){
 }
 
 // ====== 地圖（OpenStreetMap，免金鑰）======
-const VERSION = "w10";
+const VERSION = "w11";
 function showMapErr(msg){
   const box = $("mapErr");
   box.innerHTML = `<button onclick="this.parentNode.style.display='none'" style="float:right;border:0;background:none;font-size:20px;cursor:pointer">×</button><b>${L("地圖載入有問題", "Map problem")}</b><br>${msg}<br><span class="mute">版本 ${VERSION}</span>`;
@@ -967,7 +980,7 @@ const pad = f => ({paddingTopLeft: [30, 90], paddingBottomRight: [30, window.inn
 function el(html){ const d = document.createElement("div"); d.innerHTML = html; return d.firstElementChild; }
 
 // 定位：持續追蹤、最高精準度（不用舊的位置）
-let watchId = null, accCircle = null, lastNearAt = 0, followMe = true;
+var watchId = null, accCircle = null, lastNearAt = 0, followMe = true;
 function locate(){
   followMe = true;
   if (S.me && S.located) MAP.centerOn(S.me.lat, S.me.lon, 16);
@@ -1060,8 +1073,9 @@ function bikeTag(b){
 // 每個地點的「指向」（指南針）與「導航」（開 Google 地圖步行導航）
 const gnav = (lat, lon) => `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=walking`;
 const acts = (name, lat, lon) => lat == null ? "" : `<div class="acts">
+  <button class="act main" data-walk="${lat},${lon}" data-name="${esc(name)}">🚶 ${L("步行路線", "Walk route")}</button>
   <button class="act" data-cmp="${lat},${lon}" data-name="${esc(name)}">🧭 ${L("指向", "Point")}</button>
-  <a class="act" href="${gnav(lat, lon)}" target="_blank" rel="noopener">${L("步行導航", "Walk there")} ↗</a></div>`;
+  <a class="act sub" href="${gnav(lat, lon)}" target="_blank" rel="noopener">Google ↗</a></div>`;
 const showKind = k => S.nearFilter === "all" || S.nearFilter === k;
 function drawNearMarkers(){
   bikeMarkers.forEach(rm); busMarkers.forEach(rm); metroMarkers.forEach(rm); railMarkers.forEach(rm);
@@ -1086,6 +1100,7 @@ async function doPlan(text){
   hideSugg();
   { const h = (LS.get("hist") || []).filter(x => x !== text); h.unshift(text); LS.set("hist", h.slice(0, 15)); }
   S.destText = text; S.tab = "route"; S.planLoading = true; S.plan = null; S.planErr = null; S.selected = null;
+  if (walkDest) closeWalk();
   clearRoute(); openSheet(true); render(); MAP.limit(false);
   try {
     S.plan = await api(`/api/plan?lat=${S.me.lat}&lon=${S.me.lon}&to=${encodeURIComponent(text)}`);
@@ -1257,6 +1272,7 @@ function render(){
   $("body").innerHTML = h;
   document.querySelectorAll("[data-route]").forEach(c => c.onclick = () => showRoute(c.dataset.route));
   document.querySelectorAll("[data-nf]").forEach(c => c.onclick = () => { S.nearFilter = c.dataset.nf; LS.set("nf", S.nearFilter); drawNearMarkers(); render(); $("body").scrollTop = 0; });
+  document.querySelectorAll("[data-walk]").forEach(c => c.onclick = e => { e.stopPropagation(); const [a, b] = c.dataset.walk.split(",").map(Number); showWalk(c.dataset.name, a, b); });
   document.querySelectorAll("[data-cmp]").forEach(c => c.onclick = e => { e.stopPropagation(); const [a, b] = c.dataset.cmp.split(",").map(Number); startCompass(c.dataset.name, a, b); });
   document.querySelectorAll("a.act").forEach(c => c.addEventListener("click", e => e.stopPropagation()));
   document.querySelectorAll("[data-goto]").forEach(c => c.onclick = () => { const [a, b] = c.dataset.goto.split(",").map(Number); MAP.panTo(a, b, 16); });
@@ -1274,7 +1290,7 @@ function syncFab(){
   document.documentElement.style.setProperty("--sheet-h", h);
   $("locBtn").style.display = s.classList.contains("big") ? "none" : "block";
   $("langBtn").style.display = s.classList.contains("big") ? "none" : "block";
-  if (followMe && S.me && S.located && S.tab === "near") setTimeout(() => MAP.centerOn(S.me.lat, S.me.lon), 300);   // 等抽屜動畫結束
+  if (followMe && !walkDest && S.me && S.located && S.tab === "near") setTimeout(() => MAP.centerOn(S.me.lat, S.me.lon), 300);   // 等抽屜動畫結束
 }
 $("grab").onclick = () => {
   const s = $("sheet");
@@ -1370,6 +1386,61 @@ $("dest").addEventListener("blur", () => setTimeout(() => { if (document.activeE
 $("map").addEventListener("pointerdown", hideSugg);
 
 $("form").onsubmit = e => { e.preventDefault(); const v = $("dest").value.trim(); if (v) { $("dest").blur(); doPlan(v); } };
+// ====== 步行路線（直接畫在網頁地圖上）======
+var walkLine = null, walkDest = null, walkSeq = 0;
+async function walkRoute(from, to){
+  const res = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+    method: "POST",
+    headers: {"content-type": "application/json", "X-Goog-Api-Key": KEYS.google,
+      "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline"},
+    body: JSON.stringify({
+      origin: {location: {latLng: {latitude: from.lat, longitude: from.lon}}},
+      destination: {location: {latLng: {latitude: to.lat, longitude: to.lon}}},
+      travelMode: "WALK", languageCode: EN ? "en" : "zh-TW", regionCode: "TW",
+    }),
+  });
+  const j = await res.json();
+  if (!res.ok || !j.routes?.length) throw new Error(j.error?.message || "no route");
+  const r = j.routes[0];
+  return {sec: secs(r.duration), m: r.distanceMeters || 0, path: decodePolyline(r.polyline.encodedPolyline)};
+}
+async function showWalk(name, lat, lon){
+  if (!S.me) return;
+  const my = ++walkSeq;
+  closeCompass();
+  walkDest = {name, lat, lon};
+  $("walkName").textContent = "🚶 " + name;
+  $("walkTime").innerHTML = `<span class="spin"></span>`;
+  $("walkNote").textContent = L("計算步行路線中…", "Finding walking route…");
+  $("walkG").href = gnav(lat, lon);
+  $("walkBar").classList.add("on");
+  followMe = false; MAP.limit(false);
+  if (!matchMedia("(min-width: 820px)").matches) { const sh = $("sheet"); sh.classList.remove("big"); sh.classList.add("small"); syncFab(); }
+  rm(walkLine); walkLine = null;
+  let r;
+  try { r = await walkRoute(S.me, walkDest); }
+  catch (e) {
+    // 算不出路線：先畫直線，用直線距離估算
+    const d = distM(S.me.lat, S.me.lon, lat, lon);
+    r = {sec: d / 75 * 60 * 1.3, m: Math.round(d * 1.3), path: [[S.me.lat, S.me.lon], [lat, lon]], rough: true};
+  }
+  if (my !== walkSeq) return;
+  walkLine = MAP.line(r.path, "#1d4ed8");
+  const min = Math.max(1, Math.round(r.sec / 60));
+  $("walkTime").innerHTML = `${min}<small style="font-size:15px;margin-left:3px">${L("分鐘", "min")}</small><span style="font-size:17px;font-weight:800;margin-left:8px;white-space:nowrap">${r.m < 1000 ? r.m + " m" : (r.m / 1000).toFixed(1) + " km"}</span>`;
+  $("walkNote").textContent = r.rough ? L("路線算不出來，先畫直線（時間是估計的）", "Couldn't get a route — showing a straight line (estimate)") : L("藍線是建議的步行路線", "Blue line is the suggested walking route");
+  setTimeout(() => MAP.fit([[S.me.lat, S.me.lon], [lat, lon], ...r.path], 0.25), 350);
+}
+function closeWalk(){
+  walkSeq++; walkDest = null;
+  rm(walkLine); walkLine = null;
+  $("walkBar").classList.remove("on");
+  const sh = $("sheet"); if (sh.classList.contains("small")) { sh.classList.remove("small"); syncFab(); }
+  if (S.tab === "near"){ followMe = true; MAP.limit(true); if (S.me) MAP.centerOn(S.me.lat, S.me.lon, 16); }
+}
+$("walkClose").onclick = closeWalk;
+$("walkG").addEventListener("click", e => e.stopPropagation());
+
 // ====== 指南針箭頭 ======
 let cmpTarget = null, cmpAngle = 0, orientOn = false;
 function bearing(aLat, aLon, bLat, bLon){
@@ -1398,14 +1469,16 @@ async function startOrientation(){
     orientOn = true;
   } catch (e) { /* 不支援就用北方朝上 */ }
 }
+function closeCompass(){ cmpTarget = null; $("compass").classList.remove("on"); }
 function startCompass(name, lat, lon){
+  if (walkDest) closeWalk();
   cmpTarget = {name, lat, lon};
   $("compass").classList.add("on");
   $("cmpName").textContent = "🧭 " + name;
   startOrientation();
   updateCompass();
 }
-$("cmpClose").onclick = () => { cmpTarget = null; $("compass").classList.remove("on"); };
+$("cmpClose").onclick = closeCompass;
 function updateCompass(){
   if (!cmpTarget || !S.me) return;
   const d = distM(S.me.lat, S.me.lon, cmpTarget.lat, cmpTarget.lon);
